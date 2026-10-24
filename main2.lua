@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v25 (auto-hold + noclip + só solta depois de coletar) — CORRIGIDO
+    ESP + HUD — v26 (voo por baixo + auto-hold corrigido)
 ]]
 
 local Players = game:GetService("Players")
@@ -422,7 +422,7 @@ noclipToggle.MouseButton1Click:Connect(function()
 end)
 
 -- =========================================================
--- AUTO HOLD
+-- AUTO HOLD CORRIGIDO (usa fireproximityprompt como fallback)
 -- =========================================================
 local autoHoldConn = nil
 
@@ -454,14 +454,20 @@ local function iniciarAutoHold()
                     if promptPart and promptPart:IsA("BasePart") then
                         local dist = (hrp.Position - promptPart.Position).Magnitude
                         if dist <= CONFIG.AutoHoldRange then
-                            if not d:GetAttribute("AutoHolding") then
-                                d:SetAttribute("AutoHolding", true)
-                                pcall(function() d:InputHoldBegin() end)
-                            end
-                        else
-                            if d:GetAttribute("AutoHolding") then
-                                d:SetAttribute("AutoHolding", false)
-                                pcall(function() d:InputHoldEnd() end)
+                            -- ✅ Se já disparou essa porta, não repete
+                            if not d:GetAttribute("AutoFired") then
+                                d:SetAttribute("AutoFired", true)
+                                -- ✅ Tenta fireproximityprompt primeiro (mais confiável)
+                                if fireproximityprompt then
+                                    pcall(function() fireproximityprompt(d) end)
+                                else
+                                    -- Fallback: InputHold
+                                    pcall(function()
+                                        d:InputHoldBegin()
+                                        task.wait(0.05)
+                                        d:InputHoldEnd()
+                                    end)
+                                end
                             end
                         end
                     end
@@ -485,9 +491,8 @@ autoHoldToggle.MouseButton1Click:Connect(function()
     else
         if autoHoldConn then autoHoldConn:Disconnect() end
         for _, d in ipairs(Workspace:GetDescendants()) do
-            if d:IsA("ProximityPrompt") and d:GetAttribute("AutoHolding") then
-                d:SetAttribute("AutoHolding", false)
-                pcall(function() d:InputHoldEnd() end)
+            if d:IsA("ProximityPrompt") and d:GetAttribute("AutoFired") then
+                d:SetAttribute("AutoFired", false)
             end
         end
         status.Text = "Auto-hold desativado"
@@ -879,7 +884,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- =========================================================
--- TOGGLES (CORRIGIDO)
+-- TOGGLES
 -- =========================================================
 local function updateInfo()
     info.Text = string.format("Doors: %d | Players: %d",
@@ -931,7 +936,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE + AUTO-FIRE
+-- TELEPORTE + AUTO-FIRE (voo por baixo agora)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -1020,7 +1025,8 @@ tpBtn.MouseButton1Click:Connect(function()
     local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
 
     local startPos = hrp.Position
-    local alturaVoo = doorPos.Y + CONFIG.FlyHeight
+    -- ✅ VOO POR BAIXO: subtrai FlyHeight em vez de somar
+    local alturaVoo = doorPos.Y - CONFIG.FlyHeight
 
     local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)
     local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)
@@ -1033,12 +1039,15 @@ tpBtn.MouseButton1Click:Connect(function()
     tpRunning = true
     tpBtn.Active = false
     tpBtn.Text = "⏳ ..."
-    status.Text = string.format("✈️ Voando (%.0f studs)...", distanciaTotal)
+    status.Text = string.format("✈️ Voando por baixo (%.0f studs)...", distanciaTotal)
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
     task.spawn(function()
+        -- 1. Desce 100
         moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
+        -- 2. Vai por baixo
         moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
+        -- 3. Sobe até a porta
         moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
 
         pcall(function()
