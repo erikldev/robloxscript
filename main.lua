@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v16 (com controle de HoldDuration do ProximityPrompt)
+    ESP + HUD — v17 (teleporte restaurado + HoldDuration em descendentes)
 ]]
 
 local Players = game:GetService("Players")
@@ -253,7 +253,7 @@ for i, preset in ipairs(presets) do
 end
 
 -- =========================================================
--- ✅ HOLD DURATION TOGGLE + INPUT
+-- HOLD DURATION
 -- =========================================================
 local holdSep = Instance.new("Frame")
 holdSep.Size = UDim2.new(1, -20, 0, 1)
@@ -274,7 +274,6 @@ holdTitle.TextSize = 11
 holdTitle.TextXAlignment = Enum.TextXAlignment.Left
 holdTitle.Parent = panel
 
--- Toggle on/off
 local holdToggle = Instance.new("TextButton")
 holdToggle.Size = UDim2.new(0.5, -15, 0, 30)
 holdToggle.Position = UDim2.new(0, 10, 0, 270)
@@ -287,7 +286,6 @@ holdToggle.Text = "HOLD: ON"
 holdToggle.Parent = panel
 local htcc = Instance.new("UICorner"); htcc.CornerRadius = UDim.new(0, 6); htcc.Parent = holdToggle
 
--- Input de valor
 local holdInput = Instance.new("TextBox")
 holdInput.Size = UDim2.new(0.5, -15, 0, 30)
 holdInput.Position = UDim2.new(0.5, 5, 0, 270)
@@ -311,25 +309,68 @@ local holdHint = Instance.new("TextLabel")
 holdHint.Size = UDim2.new(1, -20, 0, 16)
 holdHint.Position = UDim2.new(0, 10, 0, 304)
 holdHint.BackgroundTransparency = 1
-holdHint.Text = "⚡ tempo em segundos (0.1 = quase instantâneo)"
+holdHint.Text = "⚡ segundos (0.1 = instantâneo)"
 holdHint.TextColor3 = Color3.fromRGB(150, 150, 170)
 holdHint.Font = Enum.Font.Gotham
 holdHint.TextSize = 10
 holdHint.TextXAlignment = Enum.TextXAlignment.Left
 holdHint.Parent = panel
 
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -20, 0, 18)
+status.Position = UDim2.new(0, 10, 0, 330)
+status.BackgroundTransparency = 1
+status.Text = ""
+status.TextColor3 = Color3.fromRGB(150, 255, 150)
+status.Font = Enum.Font.GothamSemibold
+status.TextSize = 12
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Parent = panel
+
 -- =========================================================
--- LÓGICA DO HOLD
+-- LÓGICA DO HOLD (com monitor de reset)
 -- =========================================================
+local holdMonitors = {} -- [prompt] = true
+
+local function aplicarHoldEmPrompt(prompt)
+    if not prompt or not prompt.Parent then return end
+    if CONFIG.ReduceHold then
+        pcall(function()
+            prompt.HoldDuration = CONFIG.HoldValue
+        end)
+    end
+end
+
 local function aplicarHold()
-    for model in pairs(doorESPs) do
-        for _, d in ipairs(model:GetDescendants()) do
-            if d:IsA("ProximityPrompt") then
-                if CONFIG.ReduceHold then
-                    d.HoldDuration = CONFIG.HoldValue
-                else
-                    -- Restaura pro valor "original" (7s padrão)
-                    d.HoldDuration = 7
+    -- Varre TODOS os descendentes do Workspace
+    -- (não confia em doorESPs, porque a porta pode não estar lá ainda)
+    for _, d in ipairs(Workspace:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            -- Verifica se está dentro de uma HalloweenDoor (subindo a árvore)
+            local estaNaPorta = false
+            local pai = d
+            for _ = 1, 10 do
+                pai = pai.Parent
+                if not pai then break end
+                if pai.Name == CONFIG.DoorName then
+                    estaNaPorta = true
+                    break
+                end
+            end
+
+            if estaNaPorta then
+                aplicarHoldEmPrompt(d)
+                if not holdMonitors[d] then
+                    holdMonitors[d] = true
+                    -- Monitor: se o server resetar, reaplica
+                    d:GetPropertyChangedSignal("HoldDuration"):Connect(function()
+                        if CONFIG.ReduceHold and d.HoldDuration ~= CONFIG.HoldValue then
+                            task.wait(0.05)
+                            pcall(function()
+                                d.HoldDuration = CONFIG.HoldValue
+                            end)
+                        end
+                    end)
                 end
             end
         end
@@ -342,14 +383,30 @@ holdToggle.MouseButton1Click:Connect(function()
     TweenService:Create(holdToggle, TweenInfo.new(0.2), {
         BackgroundColor3 = CONFIG.ReduceHold and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
     }):Play()
-    aplicarHold()
+    if CONFIG.ReduceHold then
+        aplicarHold()
+        status.Text = "✅ Hold aplicado em " .. tostring(#holdMonitors) .. " prompts"
+        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+    else
+        status.Text = "Hold desligado (server padrão)"
+        status.TextColor3 = Color3.fromRGB(255, 180, 100)
+    end
+    task.delay(3, function() status.Text = "" end)
 end)
 
 holdInput.FocusLost:Connect(function()
     local valor = tonumber(holdInput.Text)
     if valor and valor >= 0 and valor <= 10 then
         CONFIG.HoldValue = valor
-        aplicarHold()
+        if CONFIG.ReduceHold then
+            -- Reaplica em todos os monitors
+            for prompt in pairs(holdMonitors) do
+                aplicarHoldEmPrompt(prompt)
+            end
+            status.Text = "Valor: " .. tostring(valor) .. "s aplicado"
+            status.TextColor3 = Color3.fromRGB(150, 255, 150)
+            task.delay(2, function() status.Text = "" end)
+        end
     else
         holdInput.Text = tostring(CONFIG.HoldValue)
     end
@@ -592,8 +649,6 @@ local function refreshDoors()
         end
     end
     doorCount = #found
-    -- ✅ Aplica hold em portas recém-descobertas
-    if CONFIG.ReduceHold then aplicarHold() end
 end
 
 -- =========================================================
@@ -688,168 +743,5 @@ end
 
 reloadBtn.MouseButton1Click:Connect(function()
     refreshDoors(); refreshPlayers(); updateInfo()
-    status.Text = "🔄 Recarregado"
-    status.TextColor3 = Color3.fromRGB(150, 255, 150)
-    task.delay(2, function() status.Text = "" end)
-end)
-
-doorBtn.MouseButton1Click:Connect(function() setDoorEnabled(not doorEnabled) end)
-playerBtn.MouseButton1Click:Connect(function() setPlayerEnabled(not playerEnabled) end)
-
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.KeyCode == CONFIG.ToggleKey then setDoorEnabled(not doorEnabled) end
-end)
-
--- =========================================================
--- TELEPORTE POR CIMA
--- =========================================================
-local function getNearestDoor()
-    local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil end
-
-    local myPos = hrp.Position
-    local nearest, nearestDist = nil, math.huge
-    for model, d in pairs(doorESPs) do
-        local part = d.mainPart
-        if part and part.Parent then
-            local dist = (part.Position - myPos).Magnitude
-            if dist < nearestDist then
-                nearestDist = dist
-                nearest = {model = model, part = part, dist = dist}
-            end
-        end
-    end
-    return nearest
-end
-
-local tpRunning = false
-
-local function moverSuave(char, fromPos, toPos, speed, lookAt)
-    local distancia = (toPos - fromPos).Magnitude
-    if distancia < 0.1 then return end
-
-    local stepSize = math.max(2, speed * CONFIG.StepDelay)
-    stepSize = math.min(stepSize, CONFIG.StepSize * 3)
-
-    local passos = math.ceil(distancia / stepSize)
-    local direcao = (toPos - fromPos).Unit
-    local atual = fromPos
-
-    for i = 1, passos do
-        if not char or not char.Parent then break end
-        if (toPos - atual).Magnitude < stepSize then
-            pcall(function()
-                char:PivotTo(CFrame.new(toPos, lookAt or (toPos + direcao)))
-            end)
-            return
-        end
-        atual = atual + direcao * stepSize
-        pcall(function()
-            char:PivotTo(CFrame.new(atual, lookAt or (atual + direcao)))
-        end)
-        task.wait(CONFIG.StepDelay)
-    end
-end
-
-tpBtn.MouseButton1Click:Connect(function()
-    if tpRunning then return end
-
-    local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then
-        status.Text = "❌ Sem personagem"
-        status.TextColor3 = Color3.fromRGB(255, 100, 100)
-        task.delay(2, function() status.Text = "" end)
-        return
-    end
-
-    local nearest = getNearestDoor()
-    if not nearest then
-        status.Text = "❌ Nenhuma HalloweenDoor encontrada"
-        status.TextColor3 = Color3.fromRGB(255, 100, 100)
-        task.delay(2, function() status.Text = "" end)
-        return
-    end
-
-    local doorPos = nearest.part.Position
-    local direction = (hrp.Position - doorPos).Unit
-    if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
-    local finalPos = doorPos + direction * CONFIG.TeleportOffset + Vector3.new(0, 3, 0)
-    local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
-
-    local startPos = hrp.Position
-    local alturaVoo = startPos.Y + CONFIG.FlyHeight
-
-    local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)
-    local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)
-    local p3 = finalPos
-
-    local distanciaTotal = (p1 - startPos).Magnitude
-                         + (p2 - p1).Magnitude
-                         + (p3 - p2).Magnitude
-
-    tpRunning = true
-    tpBtn.Active = false
-    tpBtn.Text = "⏳ ..."
-    status.Text = string.format("✈️ Voando por cima (%.0f studs)...", distanciaTotal)
-    status.TextColor3 = Color3.fromRGB(255, 200, 100)
-
-    task.spawn(function()
-        moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
-        moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
-        moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
-
-        pcall(function()
-            char:PivotTo(CFrame.new(finalPos, lookAt))
-        end)
-
-        -- ✅ Reaplica hold se necessário
-        if CONFIG.ReduceHold then aplicarHold() end
-
-        status.Text = string.format("✅ Chegou (%.0f studs)", distanciaTotal)
-        status.TextColor3 = Color3.fromRGB(150, 255, 150)
-        tpBtn.Active = true
-        tpBtn.Text = "⚡ TELEPORTAR"
-        task.delay(2.5, function() status.Text = "" end)
-        tpRunning = false
-    end)
-end)
-
--- =========================================================
--- FECHAR / REABRIR
--- =========================================================
-closeBtn.MouseButton1Click:Connect(function()
-    panel.Visible = false
-    reopenBtn.Visible = true
-    reopenBtn.Position = panel.Position
-end)
-
-reopenBtn.MouseButton1Click:Connect(function()
-    panel.Visible = true
-    reopenBtn.Visible = false
-end)
-
--- =========================================================
--- INIT
--- =========================================================
-refreshPlayers()
-refreshDoors()
-updateInfo()
-aplicarHold()
-
--- Reaplica hold a cada 2s (caso o jogo resete)
-task.spawn(function()
-    while task.wait(2) do
-        if CONFIG.ReduceHold then aplicarHold() end
-    end
-end)
-
-task.spawn(function()
-    while task.wait(CONFIG.ScanInterval) do
-        refreshPlayers()
-        refreshDoors()
-        updateInfo()
-    end
-end)
+    aplicarHold()
+   
