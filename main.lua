@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v3 (scan tolerante)
+    ESP + HUD — v6 (teleporte suave + arrastar + fechar, sem logs)
 ]]
 
 local Players = game:GetService("Players")
@@ -21,10 +21,11 @@ local CONFIG = {
     PlayerMaxDist = 2000,
     ToggleKey     = Enum.KeyCode.E,
     ScanInterval  = 2,
+    TeleportOffset = 5,
 }
 
 -- =========================================================
--- HUD
+-- HUD BASE
 -- =========================================================
 local gui = Instance.new("ScreenGui")
 gui.Name = "ESP_HUD"
@@ -33,53 +34,80 @@ gui.IgnoreGuiInset = true
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = player:WaitForChild("PlayerGui")
 
+-- Botão flutuante pra reabrir
+local reopenBtn = Instance.new("TextButton")
+reopenBtn.Size = UDim2.new(0, 50, 0, 50)
+reopenBtn.Position = UDim2.new(0, 10, 0, 10)
+reopenBtn.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+reopenBtn.BorderSizePixel = 0
+reopenBtn.Font = Enum.Font.GothamBold
+reopenBtn.TextSize = 22
+reopenBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+reopenBtn.Text = "🎃"
+reopenBtn.Visible = false
+reopenBtn.Parent = gui
+local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(1, 0); rbc.Parent = reopenBtn
+
+-- Painel
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 340, 0, 470)
+panel.Size = UDim2.new(0, 320, 0, 340)
 panel.Position = UDim2.new(0, 10, 0, 10)
 panel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 panel.BackgroundTransparency = 0.1
 panel.BorderSizePixel = 0
+panel.Active = true
 panel.Parent = gui
 local pc = Instance.new("UICorner"); pc.CornerRadius = UDim.new(0, 10); pc.Parent = panel
 local ps = Instance.new("UIStroke"); ps.Color = Color3.fromRGB(255, 80, 80); ps.Thickness = 1.5; ps.Transparency = 0.3; ps.Parent = panel
 
+-- Cabeçalho (área de arrastar)
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 34)
+header.BackgroundTransparency = 1
+header.Active = true
+header.Parent = panel
+
+-- Título
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -20, 0, 26)
-title.Position = UDim2.new(0, 10, 0, 6)
+title.Size = UDim2.new(1, -100, 0, 26)
+title.Position = UDim2.new(0, 10, 0, 4)
 title.BackgroundTransparency = 1
 title.Text = "🎃 ESP HALLOWEEN"
 title.TextColor3 = Color3.fromRGB(255, 220, 220)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 15
 title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = panel
+title.Parent = header
 
-local reloadBtn = Instance.new("TextButton")
-reloadBtn.Size = UDim2.new(0, 100, 0, 24)
-reloadBtn.Position = UDim2.new(1, -110, 0, 7)
-reloadBtn.BackgroundColor3 = Color3.fromRGB(255, 160, 60)
-reloadBtn.BorderSizePixel = 0
-reloadBtn.Font = Enum.Font.GothamBold
-reloadBtn.TextSize = 12
-reloadBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-reloadBtn.Text = "🔄 RECARREGAR"
-reloadBtn.Parent = panel
-local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0, 6); rc.Parent = reloadBtn
+-- Botão FECHAR
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 24, 0, 24)
+closeBtn.Position = UDim2.new(1, -34, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+closeBtn.BorderSizePixel = 0
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Text = "✖"
+closeBtn.Parent = header
+local cbc = Instance.new("UICorner"); cbc.CornerRadius = UDim.new(0, 6); cbc.Parent = closeBtn
 
+-- Info
 local info = Instance.new("TextLabel")
 info.Size = UDim2.new(1, -20, 0, 18)
-info.Position = UDim2.new(0, 10, 0, 36)
+info.Position = UDim2.new(0, 10, 0, 38)
 info.BackgroundTransparency = 1
-info.Text = "Doors: 0 | Players: 0 | Drawing: " .. (HAS_DRAWING and "SIM" or "NÃO")
-info.TextColor3 = HAS_DRAWING and Color3.fromRGB(150, 255, 150) or Color3.fromRGB(255, 180, 100)
+info.Text = "Doors: 0 | Players: 0"
+info.TextColor3 = Color3.fromRGB(200, 200, 210)
 info.Font = Enum.Font.Gotham
-info.TextSize = 11
+info.TextSize = 12
 info.TextXAlignment = Enum.TextXAlignment.Left
 info.Parent = panel
 
+-- Toggles
 local doorBtn = Instance.new("TextButton")
 doorBtn.Size = UDim2.new(0.5, -15, 0, 30)
-doorBtn.Position = UDim2.new(0, 10, 0, 58)
+doorBtn.Position = UDim2.new(0, 10, 0, 62)
 doorBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
 doorBtn.BorderSizePixel = 0
 doorBtn.Font = Enum.Font.GothamBold
@@ -91,7 +119,7 @@ local dc = Instance.new("UICorner"); dc.CornerRadius = UDim.new(0, 6); dc.Parent
 
 local playerBtn = Instance.new("TextButton")
 playerBtn.Size = UDim2.new(0.5, -15, 0, 30)
-playerBtn.Position = UDim2.new(0.5, 5, 0, 58)
+playerBtn.Position = UDim2.new(0.5, 5, 0, 62)
 playerBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
 playerBtn.BorderSizePixel = 0
 playerBtn.Font = Enum.Font.GothamBold
@@ -101,63 +129,75 @@ playerBtn.Text = "PLAYER: ON"
 playerBtn.Parent = panel
 local plc = Instance.new("UICorner"); plc.CornerRadius = UDim.new(0, 6); plc.Parent = playerBtn
 
-local sep = Instance.new("Frame")
-sep.Size = UDim2.new(1, -20, 0, 1)
-sep.Position = UDim2.new(0, 10, 0, 96)
-sep.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-sep.BackgroundTransparency = 0.8
-sep.BorderSizePixel = 0
-sep.Parent = panel
+-- Botão RECARREGAR
+local reloadBtn = Instance.new("TextButton")
+reloadBtn.Size = UDim2.new(0.5, -15, 0, 34)
+reloadBtn.Position = UDim2.new(0, 10, 0, 100)
+reloadBtn.BackgroundColor3 = Color3.fromRGB(255, 160, 60)
+reloadBtn.BorderSizePixel = 0
+reloadBtn.Font = Enum.Font.GothamBold
+reloadBtn.TextSize = 12
+reloadBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+reloadBtn.Text = "🔄 RECARREGAR"
+reloadBtn.Parent = panel
+local rlc = Instance.new("UICorner"); rlc.CornerRadius = UDim.new(0, 6); rlc.Parent = reloadBtn
 
-local logTitle = Instance.new("TextLabel")
-logTitle.Size = UDim2.new(1, -20, 0, 16)
-logTitle.Position = UDim2.new(0, 10, 0, 102)
-logTitle.BackgroundTransparency = 1
-logTitle.Text = "📋 LOGS"
-logTitle.TextColor3 = Color3.fromRGB(255, 200, 100)
-logTitle.Font = Enum.Font.GothamBold
-logTitle.TextSize = 11
-logTitle.TextXAlignment = Enum.TextXAlignment.Left
-logTitle.Parent = panel
+-- Botão TELEPORTAR
+local tpBtn = Instance.new("TextButton")
+tpBtn.Size = UDim2.new(0.5, -15, 0, 34)
+tpBtn.Position = UDim2.new(0.5, 5, 0, 100)
+tpBtn.BackgroundColor3 = Color3.fromRGB(150, 80, 255)
+tpBtn.BorderSizePixel = 0
+tpBtn.Font = Enum.Font.GothamBold
+tpBtn.TextSize = 12
+tpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+tpBtn.Text = "⚡ TELEPORTAR"
+tpBtn.Parent = panel
+local tpc = Instance.new("UICorner"); tpc.CornerRadius = UDim.new(0, 6); tpc.Parent = tpBtn
 
-local logFrame = Instance.new("ScrollingFrame")
-logFrame.Size = UDim2.new(1, -20, 0, 340)
-logFrame.Position = UDim2.new(0, 10, 0, 120)
-logFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
-logFrame.BorderSizePixel = 0
-logFrame.ScrollBarThickness = 6
-logFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-logFrame.Parent = panel
-local lfc = Instance.new("UICorner"); lfc.CornerRadius = UDim.new(0, 6); lfc.Parent = logFrame
+-- Status (feedback do teleporte)
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -20, 0, 18)
+status.Position = UDim2.new(0, 10, 0, 142)
+status.BackgroundTransparency = 1
+status.Text = ""
+status.TextColor3 = Color3.fromRGB(150, 255, 150)
+status.Font = Enum.Font.GothamSemibold
+status.TextSize = 12
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Parent = panel
 
-local logLayout = Instance.new("UIListLayout")
-logLayout.Padding = UDim.new(0, 2)
-logLayout.SortOrder = Enum.SortOrder.LayoutOrder
-logLayout.Parent = logFrame
+-- =========================================================
+-- DRAG DO PAINEL
+-- =========================================================
+local dragging, dragStart, startPos = false, nil, nil
 
-local logPad = Instance.new("UIPadding")
-logPad.PaddingLeft = UDim.new(0, 6)
-logPad.PaddingTop = UDim.new(0, 4)
-logPad.PaddingRight = UDim.new(0, 6)
-logPad.Parent = logFrame
+header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = panel.Position
+    end
+end)
 
-local logCount = 0
-local function log(msg, col)
-    logCount = logCount + 1
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, -8, 0, 16)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = "▸ " .. tostring(msg)
-    lbl.TextColor3 = col or Color3.fromRGB(200, 220, 200)
-    lbl.Font = Enum.Font.Code
-    lbl.TextSize = 11
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.TextWrapped = false
-    lbl.LayoutOrder = logCount
-    lbl.Parent = logFrame
-    logFrame.CanvasSize = UDim2.new(0, 0, 0, logLayout.AbsoluteContentSize.Y + 8)
-    logFrame.CanvasPosition = Vector2.new(0, math.max(0, logLayout.AbsoluteContentSize.Y - 300))
-end
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        panel.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
 
 -- =========================================================
 -- TEXTO (Drawing / BillboardGui)
@@ -239,19 +279,17 @@ local function refreshPlayers()
 end
 
 -- =========================================================
--- DOOR ESP — SCAN TOLERANTE
+-- DOOR ESP
 -- =========================================================
 local doorESPs = {}
 local doorEnabled = true
 local doorCount = 0
 
--- Aceita qualquer nome que contenha "hallowen" ou "halloween" (case insensitive)
 local function isHallowenName(name)
     local n = name:lower()
     return n:find("hallowen") ~= nil or n:find("halloween") ~= nil
 end
 
--- Acha a primeira BasePart descendente
 local function findFirstPart(obj)
     if obj:IsA("BasePart") then return obj end
     for _, d in ipairs(obj:GetDescendants()) do
@@ -285,53 +323,30 @@ local function destroyDoorESP(d)
     if d.distT then d.distT.remove() end
 end
 
--- Scan TOLERANTE: procura HallowenDoor em TODO o Workspace (até 8 níveis)
-local function scanDoors(silent)
-    if not silent then log("━━━ SCAN TOLERANTE ━━━", Color3.fromRGB(255, 200, 100)) end
-
+local function scanDoors()
     local found = {}
     local visited = {}
-
     local function walk(obj, depth)
-        if depth > 8 then return end
-        if visited[obj] then return end
+        if depth > 8 or visited[obj] then return end
         visited[obj] = true
-
         for _, k in ipairs(obj:GetChildren()) do
             if isHallowenName(k.Name) then
-                -- aceita Model OU qualquer coisa com BasePart dentro
                 local part = findFirstPart(k)
                 if part then
                     table.insert(found, {model = k, part = part})
-                    if not silent then
-                        log("🎯 " .. k:GetFullName() .. " [" .. k.ClassName .. "]",
-                            Color3.fromRGB(100, 255, 100))
-                    end
-                else
-                    if not silent then
-                        log("⚠️ " .. k:GetFullName() .. " sem BasePart",
-                            Color3.fromRGB(255, 180, 100))
-                    end
                 end
             end
-            -- continua descendo em Models/Folders
             if k:IsA("Model") or k:IsA("Folder") then
                 pcall(walk, k, depth + 1)
             end
         end
     end
-
     walk(Workspace, 0)
-
-    if not silent then
-        log(string.format("🏁 Scan: %d HallowenDoor(s)", #found),
-            #found > 0 and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 180, 100))
-    end
     return found
 end
 
-local function refreshDoors(silent)
-    local found = scanDoors(silent)
+local function refreshDoors()
+    local found = scanDoors()
     local current = {}
     for _, e in ipairs(found) do current[e.model] = e.part end
 
@@ -401,9 +416,8 @@ end)
 -- TOGGLES
 -- =========================================================
 local function updateInfo()
-    info.Text = string.format("Doors: %d | Players: %d | Drawing: %s",
-        doorCount, math.max(0, #Players:GetPlayers() - 1),
-        HAS_DRAWING and "SIM" or "NÃO")
+    info.Text = string.format("Doors: %d | Players: %d",
+        doorCount, math.max(0, #Players:GetPlayers() - 1))
 end
 
 local function setDoorEnabled(state)
@@ -435,9 +449,12 @@ local function setPlayerEnabled(state)
 end
 
 reloadBtn.MouseButton1Click:Connect(function()
-    log("", Color3.new(1,1,1))
-    refreshDoors(false); refreshPlayers(); updateInfo()
+    refreshDoors(); refreshPlayers(); updateInfo()
+    status.Text = "🔄 Recarregado"
+    status.TextColor3 = Color3.fromRGB(150, 255, 150)
+    task.delay(2, function() status.Text = "" end)
 end)
+
 doorBtn.MouseButton1Click:Connect(function() setDoorEnabled(not doorEnabled) end)
 playerBtn.MouseButton1Click:Connect(function() setPlayerEnabled(not playerEnabled) end)
 
@@ -447,24 +464,112 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
+-- TELEPORTE SUAVE (tween)
+-- =========================================================
+local function getNearestDoor()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    local myPos = hrp.Position
+    local nearest, nearestDist = nil, math.huge
+    for model, d in pairs(doorESPs) do
+        local part = d.mainPart
+        if part and part.Parent then
+            local dist = (part.Position - myPos).Magnitude
+            if dist < nearestDist then
+                nearestDist = dist
+                nearest = {model = model, part = part, dist = dist}
+            end
+        end
+    end
+    return nearest
+end
+
+tpBtn.MouseButton1Click:Connect(function()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        status.Text = "❌ Sem personagem"
+        status.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.delay(2, function() status.Text = "" end)
+        return
+    end
+
+    local nearest = getNearestDoor()
+    if not nearest then
+        status.Text = "❌ Nenhuma porta encontrada"
+        status.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.delay(2, function() status.Text = "" end)
+        return
+    end
+
+    local targetPos = nearest.part.Position + Vector3.new(0, 3, 0)
+    local direction = (hrp.Position - targetPos).Unit
+    if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
+    local finalPos = targetPos + direction * CONFIG.TeleportOffset
+
+    -- Duração baseada na distância (min 0.4s, max 2s)
+    local distancia = (finalPos - hrp.Position).Magnitude
+    local duracao = math.clamp(distancia / 100, 0.4, 2)
+
+    status.Text = string.format("⚡ Teleportando... (%.0f studs)", distancia)
+    status.TextColor3 = Color3.fromRGB(255, 200, 100)
+    tpBtn.Active = false
+    tpBtn.Text = "⏳ ..."
+
+    -- CFrame alvo mantendo a orientação atual
+    local targetCFrame = CFrame.new(finalPos) * (hrp.CFrame - hrp.CFrame.Position)
+
+    -- Cria o tween
+    local tween = TweenService:Create(
+        hrp,
+        TweenInfo.new(duracao, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        { CFrame = targetCFrame }
+    )
+
+    tween:Play()
+    tween.Completed:Connect(function()
+        -- Olha pra porta ao chegar
+        if hrp.Parent and nearest.part.Parent then
+            hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(
+                nearest.part.Position.X,
+                hrp.Position.Y,
+                nearest.part.Position.Z
+            ))
+        end
+        status.Text = string.format("✅ Chegou! (%.0f studs)", distancia)
+        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+        tpBtn.Active = true
+        tpBtn.Text = "⚡ TELEPORTAR"
+        task.delay(2, function() status.Text = "" end)
+    end)
+end)
+
+-- =========================================================
+-- FECHAR / REABRIR
+-- =========================================================
+closeBtn.MouseButton1Click:Connect(function()
+    panel.Visible = false
+    reopenBtn.Visible = true
+end)
+
+reopenBtn.MouseButton1Click:Connect(function()
+    panel.Visible = true
+    reopenBtn.Visible = false
+end)
+
+-- =========================================================
 -- INIT
 -- =========================================================
-log("🚀 Iniciado (scan tolerante)", Color3.fromRGB(100, 255, 100))
-log("Drawing: " .. (HAS_DRAWING and "SIM ✅" or "NÃO ⚠️"),
-    HAS_DRAWING and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 180, 100))
-
 refreshPlayers()
-refreshDoors(false)
+refreshDoors()
 updateInfo()
 
 task.spawn(function()
     while task.wait(CONFIG.ScanInterval) do
         refreshPlayers()
-        local before = doorCount
-        refreshDoors(true)
-        if doorCount ~= before then
-            log("🔄 Doors: " .. before .. " → " .. doorCount, Color3.fromRGB(150, 255, 150))
-        end
+        refreshDoors()
         updateInfo()
     end
 end)
