@@ -1,14 +1,5 @@
 --[[
-    ESP + HUD — v30 (DEFINITIVA)
-    Features:
-    - ESP de HalloweenDoor e Players
-    - Teleporte com TweenService (velocidade adaptativa)
-    - Grude (re-fixa posição até soltar)
-    - Trazer porta até você (com fallback)
-    - Auto-hold (fireproximityprompt)
-    - Noclip toggle
-    - Anti-AFK
-    - HoldDuration ajustável
+    ESP + HUD — v31 (DEFINITIVA, verificada)
 ]]
 
 local Players = game:GetService("Players")
@@ -34,15 +25,12 @@ local CONFIG = {
     ToggleKey     = Enum.KeyCode.E,
     ScanInterval  = 2,
     TeleportOffset = 5,
-    -- Velocidades adaptativas (Blox Fruits style)
     SpeedVeryClose = 1000,
     SpeedClose     = 350,
     SpeedMedium    = 350,
     SpeedFar       = 300,
-    -- Voo por baixo
     UsarVooBaixo  = true,
     FlyHeight     = 100,
-    -- Hold
     ReduceHold    = true,
     HoldValue     = 0.1,
     AutoFire      = true,
@@ -52,9 +40,7 @@ local CONFIG = {
     AntiAFK       = true,
 }
 
--- =========================================================
--- ANTI-AFK
--- =========================================================
+-- Anti-AFK
 if CONFIG.AntiAFK then
     for _, v in pairs(getconnections(player.Idled)) do
         v:Disable()
@@ -65,9 +51,7 @@ if CONFIG.AntiAFK then
     end)
 end
 
--- =========================================================
--- ESTADO GLOBAL
--- =========================================================
+-- Estado do grude
 local grudado = false
 local posGrude = nil
 local lookGrude = nil
@@ -147,7 +131,6 @@ info.TextSize = 12
 info.TextXAlignment = Enum.TextXAlignment.Left
 info.Parent = panel
 
--- Toggles DOOR/PLAYER
 local doorBtn = Instance.new("TextButton")
 doorBtn.Size = UDim2.new(0.5, -15, 0, 30)
 doorBtn.Position = UDim2.new(0, 10, 0, 62)
@@ -172,7 +155,6 @@ playerBtn.Text = "PLAYER: ON"
 playerBtn.Parent = panel
 local plc = Instance.new("UICorner"); plc.CornerRadius = UDim.new(0, 6); plc.Parent = playerBtn
 
--- Botões de ação
 local reloadBtn = Instance.new("TextButton")
 reloadBtn.Size = UDim2.new(0.5, -15, 0, 32)
 reloadBtn.Position = UDim2.new(0, 10, 0, 100)
@@ -221,7 +203,6 @@ teleportarBtn.Text = "✈️ VOAR ATÉ"
 teleportarBtn.Parent = panel
 local tlc = Instance.new("UICorner"); tlc.CornerRadius = UDim.new(0, 6); tlc.Parent = teleportarBtn
 
--- Velocidade
 local speedLabel = Instance.new("TextLabel")
 speedLabel.Size = UDim2.new(1, -20, 0, 16)
 speedLabel.Position = UDim2.new(0, 10, 0, 178)
@@ -265,7 +246,6 @@ sliderHit.Text = ""
 sliderHit.ZIndex = 3
 sliderHit.Parent = sliderBg
 
--- Separador
 local sep1 = Instance.new("Frame")
 sep1.Size = UDim2.new(1, -20, 0, 1)
 sep1.Position = UDim2.new(0, 10, 0, 220)
@@ -274,7 +254,6 @@ sep1.BackgroundTransparency = 0.85
 sep1.BorderSizePixel = 0
 sep1.Parent = panel
 
--- Hold
 local holdTitle = Instance.new("TextLabel")
 holdTitle.Size = UDim2.new(1, -20, 0, 16)
 holdTitle.Position = UDim2.new(0, 10, 0, 228)
@@ -316,7 +295,6 @@ holdStroke.Thickness = 1
 holdStroke.Transparency = 0.5
 holdStroke.Parent = holdInput
 
--- Separador 2
 local sep2 = Instance.new("Frame")
 sep2.Size = UDim2.new(1, -20, 0, 1)
 sep2.Position = UDim2.new(0, 10, 0, 286)
@@ -325,7 +303,6 @@ sep2.BackgroundTransparency = 0.85
 sep2.BorderSizePixel = 0
 sep2.Parent = panel
 
--- Auto hold
 local autoHoldToggle = Instance.new("TextButton")
 autoHoldToggle.Size = UDim2.new(1, -20, 0, 28)
 autoHoldToggle.Position = UDim2.new(0, 10, 0, 294)
@@ -338,7 +315,6 @@ autoHoldToggle.Text = "AUTO-HOLD: ON"
 autoHoldToggle.Parent = panel
 local ahc = Instance.new("UICorner"); ahc.CornerRadius = UDim.new(0, 6); ahc.Parent = autoHoldToggle
 
--- Noclip
 local noclipToggle = Instance.new("TextButton")
 noclipToggle.Size = UDim2.new(1, -20, 0, 28)
 noclipToggle.Position = UDim2.new(0, 10, 0, 330)
@@ -351,7 +327,6 @@ noclipToggle.Text = "NOCLIP: OFF"
 noclipToggle.Parent = panel
 local ncc = Instance.new("UICorner"); ncc.CornerRadius = UDim.new(0, 6); ncc.Parent = noclipToggle
 
--- Auto fire
 local autoFireToggle = Instance.new("TextButton")
 autoFireToggle.Size = UDim2.new(1, -20, 0, 28)
 autoFireToggle.Position = UDim2.new(0, 10, 0, 366)
@@ -364,7 +339,6 @@ autoFireToggle.Text = "AUTO-FIRE: ON"
 autoFireToggle.Parent = panel
 local afc = Instance.new("UICorner"); afc.CornerRadius = UDim.new(0, 6); afc.Parent = autoFireToggle
 
--- Voo por baixo
 local vooToggle = Instance.new("TextButton")
 vooToggle.Size = UDim2.new(1, -20, 0, 28)
 vooToggle.Position = UDim2.new(0, 10, 0, 402)
@@ -389,7 +363,7 @@ status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = panel
 
 -- =========================================================
--- FUNÇÕES DE GRUDE
+-- FUNÇÕES GRUDE
 -- =========================================================
 local function soltar()
     grudado = false
@@ -434,10 +408,7 @@ end
 local noclipConn = nil
 
 local function aplicarNoclip()
-    local char = player.Character
-    if not char then return end
     if noclipConn then noclipConn:Disconnect() end
-
     if CONFIG.NoclipEnabled then
         noclipConn = RunService.Stepped:Connect(function()
             local c = player.Character
@@ -528,7 +499,8 @@ autoHoldToggle.MouseButton1Click:Connect(function()
     TweenService:Create(autoHoldToggle, TweenInfo.new(0.2), {
         BackgroundColor3 = CONFIG.AutoHold and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
     }):Play()
-    if CONFIG.AutoHold then iniciarAutoHold()
+    if CONFIG.AutoHold then
+        iniciarAutoHold()
     else
         if autoHoldConn then autoHoldConn:Disconnect() end
         for _, d in ipairs(Workspace:GetDescendants()) do
@@ -623,7 +595,7 @@ vooToggle.MouseButton1Click:Connect(function()
 end)
 
 -- =========================================================
--- SLIDER VELOCIDADE
+-- SLIDER
 -- =========================================================
 local function setSpeedFromRel(rel)
     rel = math.clamp(rel, 0, 1)
@@ -767,8 +739,7 @@ local function refreshPlayers()
         if not pl.Parent or not pl.Character then
             destroyPlayerESP(d); playerESPs[pl] = nil
         else
-            d.highlight.Adornee = pl.Character
-        end
+            d.highlight.Adornee = pl.Character        end
     end
     for _, pl in ipairs(Players:GetPlayers()) do
         if pl ~= player and pl.Character and not playerESPs[pl] then
@@ -858,7 +829,7 @@ local function refreshDoors()
 end
 
 -- =========================================================
--- LOOP ESP
+-- LOOP
 -- =========================================================
 RunService.RenderStepped:Connect(function()
     if playerEnabled then
@@ -912,7 +883,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- =========================================================
--- TOGGLES
+-- TOGGLES DOOR/PLAYER (CORRIGIDO)
 -- =========================================================
 local function updateInfo()
     info.Text = string.format("Doors: %d | Players: %d",
@@ -966,7 +937,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- FUNÇÕES DE TELEPORTE
+-- TELEPORTE
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -995,7 +966,6 @@ local function getPromptFromDoor(doorModel)
     return nil
 end
 
--- ✅ Velocidade adaptativa (Blox Fruits v2)
 local function calcularVelocidade(distancia)
     if distancia < 10 then return CONFIG.SpeedVeryClose
     elseif distancia < 170 then return CONFIG.SpeedClose
@@ -1003,7 +973,6 @@ local function calcularVelocidade(distancia)
     else return CONFIG.SpeedFar end
 end
 
--- ✅ Tween direto (igual Blox Fruits v2)
 local function tweenPara(hrp, destino, lookAt)
     local distancia = (destino - hrp.Position).Magnitude
     if distancia < 0.1 then return end
@@ -1019,9 +988,6 @@ local function tweenPara(hrp, destino, lookAt)
     tween.Completed:Wait()
 end
 
--- =========================================================
--- BOTÃO GRUDAR (voo por baixo opcional + grude)
--- =========================================================
 local tpRunning = false
 
 grudeBtn.MouseButton1Click:Connect(function()
@@ -1037,16 +1003,11 @@ grudeBtn.MouseButton1Click:Connect(function()
 
     local char = player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then
-        status.Text = "❌ Sem personagem"
-        status.TextColor3 = Color3.fromRGB(255, 100, 100)
-        task.delay(2, function() status.Text = "" end)
-        return
-    end
+    if not hrp then return end
 
     local nearest = getNearestDoor()
     if not nearest then
-        status.Text = "❌ Nenhuma porta encontrada"
+        status.Text = "❌ Nenhuma porta"
         status.TextColor3 = Color3.fromRGB(255, 100, 100)
         task.delay(2, function() status.Text = "" end)
         return
@@ -1060,104 +1021,65 @@ grudeBtn.MouseButton1Click:Connect(function()
     finalPos = Vector3.new(finalPos.X, doorPos.Y, finalPos.Z)
     local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
 
-    local startPos = hrp.Position
-    local distancia = (finalPos - startPos).Magnitude
-
     tpRunning = true
     grudeBtn.Active = false
     grudeBtn.Text = "⏳ ..."
 
-    if CONFIG.UsarVooBaixo then
-        local alturaVoo = doorPos.Y - CONFIG.FlyHeight
-        local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)
-        local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)
+    task.spawn(function()
+        if CONFIG.UsarVooBaixo then
+            local startPos = hrp.Position
+            local alturaVoo = doorPos.Y - CONFIG.FlyHeight
+            local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)
+            local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)
 
-        status.Text = "✈️ Voando por baixo..."
-        status.TextColor3 = Color3.fromRGB(255, 200, 100)
+            status.Text = "✈️ Voando por baixo..."
+            status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
-        task.spawn(function()
             tweenPara(hrp, p1, lookAt)
             tweenPara(hrp, p2, lookAt)
             tweenPara(hrp, finalPos, lookAt)
-
-            if CONFIG.ReduceHold then aplicarHold() end
-            grudar(char, finalPos, lookAt)
-
-            if CONFIG.AutoFire then
-                local prompt = getPromptFromDoor(nearest.model)
-                if prompt then
-                    if CONFIG.ReduceHold then
-                        pcall(function() prompt.HoldDuration = CONFIG.HoldValue end)
-                    end
-                    if fireproximityprompt then
-                        pcall(function() fireproximityprompt(prompt) end)
-                    else
-                        pcall(function()
-                            prompt:InputHoldBegin()
-                            prompt:InputHoldEnd()
-                        end)
-                    end
-                end
-            end
-
-            status.Text = "🔥 Grudado + ativado!"
-            status.TextColor3 = Color3.fromRGB(150, 255, 150)
-            grudeBtn.Active = true
-            grudeBtn.Text = "🔓 SOLTAR"
-            tpRunning = false
-        end)
-    else
-        status.Text = string.format("⚡ Tween (%.0f studs)...", distancia)
-        status.TextColor3 = Color3.fromRGB(255, 200, 100)
-
-        task.spawn(function()
+        else
+            status.Text = "⚡ Voando..."
+            status.TextColor3 = Color3.fromRGB(255, 200, 100)
             tweenPara(hrp, finalPos, lookAt)
+        end
 
-            if CONFIG.ReduceHold then aplicarHold() end
-            grudar(char, finalPos, lookAt)
+        if CONFIG.ReduceHold then aplicarHold() end
+        grudar(char, finalPos, lookAt)
 
-            if CONFIG.AutoFire then
-                local prompt = getPromptFromDoor(nearest.model)
-                if prompt then
-                    if CONFIG.ReduceHold then
-                        pcall(function() prompt.HoldDuration = CONFIG.HoldValue end)
-                    end
-                    if fireproximityprompt then
-                        pcall(function() fireproximityprompt(prompt) end)
-                    else
-                        pcall(function()
-                            prompt:InputHoldBegin()
-                            prompt:InputHoldEnd()
-                        end)
-                    end
+        if CONFIG.AutoFire then
+            local prompt = getPromptFromDoor(nearest.model)
+            if prompt then
+                if CONFIG.ReduceHold then
+                    pcall(function() prompt.HoldDuration = CONFIG.HoldValue end)
+                end
+                if fireproximityprompt then
+                    pcall(function() fireproximityprompt(prompt) end)
+                else
+                    pcall(function()
+                        prompt:InputHoldBegin()
+                        prompt:InputHoldEnd()
+                    end)
                 end
             end
+        end
 
-            status.Text = "🔥 Grudado + ativado!"
-            status.TextColor3 = Color3.fromRGB(150, 255, 150)
-            grudeBtn.Active = true
-            grudeBtn.Text = "🔓 SOLTAR"
-            tpRunning = false
-        end)
-    end
+        status.Text = "🔥 Grudado + ativado!"
+        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+        grudeBtn.Active = true
+        grudeBtn.Text = "🔓 SOLTAR"
+        tpRunning = false
+    end)
 end)
 
--- =========================================================
--- BOTÃO TRAZER PORTA (com fallback)
--- =========================================================
 trazerBtn.MouseButton1Click:Connect(function()
     local char = player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then
-        status.Text = "❌ Sem personagem"
-        status.TextColor3 = Color3.fromRGB(255, 100, 100)
-        task.delay(2, function() status.Text = "" end)
-        return
-    end
+    if not hrp then return end
 
     local nearest = getNearestDoor()
     if not nearest then
-        status.Text = "❌ Nenhuma porta encontrada"
+        status.Text = "❌ Nenhuma porta"
         status.TextColor3 = Color3.fromRGB(255, 100, 100)
         task.delay(2, function() status.Text = "" end)
         return
@@ -1168,7 +1090,6 @@ trazerBtn.MouseButton1Click:Connect(function()
     local novaPos = myPos + myLook * CONFIG.TeleportOffset + Vector3.new(0, 1, 0)
     local posOriginal = nearest.part.Position
 
-    -- Tenta mover a porta
     pcall(function()
         nearest.model:PivotTo(CFrame.new(novaPos, myPos))
     end)
@@ -1178,10 +1099,8 @@ trazerBtn.MouseButton1Click:Connect(function()
 
     task.wait(0.4)
 
-    -- Verifica se ficou perto
     local dist = (nearest.part.Position - myPos).Magnitude
     if dist > 15 then
-        -- Porta voltou → teleporta player
         status.Text = "⚠️ Porta voltou. Voando até ela..."
         status.TextColor3 = Color3.fromRGB(255, 180, 100)
 
@@ -1196,10 +1115,8 @@ trazerBtn.MouseButton1Click:Connect(function()
 
         if CONFIG.AutoFire then
             local prompt = getPromptFromDoor(nearest.model)
-            if prompt then
-                if fireproximityprompt then
-                    pcall(function() fireproximityprompt(prompt) end)
-                end
+            if prompt and fireproximityprompt then
+                pcall(function() fireproximityprompt(prompt) end)
             end
         end
 
@@ -1212,9 +1129,6 @@ trazerBtn.MouseButton1Click:Connect(function()
     task.delay(3, function() status.Text = "" end)
 end)
 
--- =========================================================
--- BOTÃO VOAR ATÉ (só teleporta, sem grude)
--- =========================================================
 teleportarBtn.MouseButton1Click:Connect(function()
     local char = player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -1243,10 +1157,8 @@ teleportarBtn.MouseButton1Click:Connect(function()
     if CONFIG.ReduceHold then aplicarHold() end
     if CONFIG.AutoFire then
         local prompt = getPromptFromDoor(nearest.model)
-        if prompt then
-            if fireproximityprompt then
-                pcall(function() fireproximityprompt(prompt) end)
-            end
+        if prompt and fireproximityprompt then
+            pcall(function() fireproximityprompt(prompt) end)
         end
     end
 
