@@ -33,7 +33,7 @@ local CONFIG = {
     ReduceHold    = true,
     HoldValue     = 0.1,
     AutoFire      = true,
-    ManterPosicao = 3.0, -- ✅ 1 segundo re-fixando posição
+    ManterPosicao = 300.0, -- ✅ 1 segundo re-fixando posição
 }
 
 -- =========================================================
