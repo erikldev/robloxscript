@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v32 (voo: sobe 200, desce 150)
+    ESP + HUD — v33 (voo 200↑ 150↓ + auto-hold em loop 1s)
 ]]
 
 local Players = game:GetService("Players")
@@ -29,7 +29,6 @@ local CONFIG = {
     SpeedClose     = 350,
     SpeedMedium    = 350,
     SpeedFar       = 300,
-    -- ✅ Voo: sobe 200, desce 150
     SubirHeight   = 200,
     DescerHeight  = 150,
     UsarVoo       = true,
@@ -313,7 +312,7 @@ autoHoldToggle.BorderSizePixel = 0
 autoHoldToggle.Font = Enum.Font.GothamBold
 autoHoldToggle.TextSize = 10
 autoHoldToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
-autoHoldToggle.Text = "AUTO-HOLD: ON"
+autoHoldToggle.Text = "AUTO-HOLD: ON (loop 1s)"
 autoHoldToggle.Parent = panel
 local ahc = Instance.new("UICorner"); ahc.CornerRadius = UDim.new(0, 6); ahc.Parent = autoHoldToggle
 
@@ -443,48 +442,56 @@ noclipToggle.MouseButton1Click:Connect(function()
 end)
 
 -- =========================================================
--- AUTO HOLD
+-- AUTO HOLD (loop 1s, tenta até coletar)
 -- =========================================================
-local autoHoldConn = nil
+local autoHoldThread = nil
 
 local function iniciarAutoHold()
-    if autoHoldConn then autoHoldConn:Disconnect() end
+    if autoHoldThread then
+        pcall(function() task.cancel(autoHoldThread) end)
+        autoHoldThread = nil
+    end
     if not CONFIG.AutoHold then return end
 
-    autoHoldConn = RunService.Heartbeat:Connect(function()
-        if not CONFIG.AutoHold then return end
-        local char = player.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
+    autoHoldThread = task.spawn(function()
+        while CONFIG.AutoHold do
+            task.wait(1) -- ✅ 1 segundo entre tentativas
 
-        for _, d in ipairs(Workspace:GetDescendants()) do
-            if d:IsA("ProximityPrompt") then
-                local pai = d
-                local estaNaPorta = false
-                for _ = 1, 10 do
-                    pai = pai.Parent
-                    if not pai then break end
-                    if pai.Name == CONFIG.DoorName then
-                        estaNaPorta = true
-                        break
-                    end
-                end
+            if not CONFIG.AutoHold then break end
 
-                if estaNaPorta then
-                    local promptPart = d.Parent
-                    if promptPart and promptPart:IsA("BasePart") then
-                        local dist = (hrp.Position - promptPart.Position).Magnitude
-                        if dist <= CONFIG.AutoHoldRange then
-                            if not d:GetAttribute("AutoFired") then
-                                d:SetAttribute("AutoFired", true)
-                                if fireproximityprompt then
-                                    pcall(function() fireproximityprompt(d) end)
-                                else
-                                    pcall(function()
-                                        d:InputHoldBegin()
-                                        task.wait(0.05)
-                                        d:InputHoldEnd()
-                                    end)
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                for _, d in ipairs(Workspace:GetDescendants()) do
+                    if d:IsA("ProximityPrompt") then
+                        local pai = d
+                        local porta = nil
+                        local estaNaPorta = false
+                        for _ = 1, 10 do
+                            pai = pai.Parent
+                            if not pai then break end
+                            if pai.Name == CONFIG.DoorName then
+                                estaNaPorta = true
+                                porta = pai
+                                break
+                            end
+                        end
+
+                        if estaNaPorta and porta and porta.Parent then
+                            local promptPart = d.Parent
+                            if promptPart and promptPart:IsA("BasePart") then
+                                local dist = (hrp.Position - promptPart.Position).Magnitude
+                                if dist <= CONFIG.AutoHoldRange then
+                                    -- ✅ Tenta disparar SEMPRE (sem marcar como fired)
+                                    if fireproximityprompt then
+                                        pcall(function() fireproximityprompt(d) end)
+                                    else
+                                        pcall(function()
+                                            d:InputHoldBegin()
+                                            task.wait(0.05)
+                                            d:InputHoldEnd()
+                                        end)
+                                    end
                                 end
                             end
                         end
@@ -497,18 +504,16 @@ end
 
 autoHoldToggle.MouseButton1Click:Connect(function()
     CONFIG.AutoHold = not CONFIG.AutoHold
-    autoHoldToggle.Text = CONFIG.AutoHold and "AUTO-HOLD: ON" or "AUTO-HOLD: OFF"
+    autoHoldToggle.Text = CONFIG.AutoHold and "AUTO-HOLD: ON (loop 1s)" or "AUTO-HOLD: OFF"
     TweenService:Create(autoHoldToggle, TweenInfo.new(0.2), {
         BackgroundColor3 = CONFIG.AutoHold and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
     }):Play()
     if CONFIG.AutoHold then
         iniciarAutoHold()
     else
-        if autoHoldConn then autoHoldConn:Disconnect() end
-        for _, d in ipairs(Workspace:GetDescendants()) do
-            if d:IsA("ProximityPrompt") and d:GetAttribute("AutoFired") then
-                d:SetAttribute("AutoFired", false)
-            end
+        if autoHoldThread then
+            pcall(function() task.cancel(autoHoldThread) end)
+            autoHoldThread = nil
         end
     end
 end)
@@ -940,7 +945,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE (200↑ 150↓)
+-- TELEPORTE
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -991,25 +996,20 @@ local function tweenPara(hrp, destino, lookAt)
     tween.Completed:Wait()
 end
 
--- ✅ VOO EM ARCO: sobe 200, vai por cima, desce 150
 local function voarAte(hrp, finalPos, lookAt)
     local startPos = hrp.Position
-    local alturaSubir = startPos.Y + CONFIG.SubirHeight  -- sobe 200 do chão atual
-    local alturaDescer = finalPos.Y + CONFIG.DescerHeight -- desce 150 acima da porta
+    local alturaSubir = startPos.Y + CONFIG.SubirHeight
+    local alturaDescer = finalPos.Y + CONFIG.DescerHeight
 
-    -- Ponto 1: sobe 200
     local p1 = Vector3.new(startPos.X, alturaSubir, startPos.Z)
-    -- Ponto 2: vai por cima até XZ da porta (mantendo 200)
     local p2 = Vector3.new(finalPos.X, alturaSubir, finalPos.Z)
-    -- Ponto 3: desce até 150 acima da porta
     local p3 = Vector3.new(finalPos.X, alturaDescer, finalPos.Z)
-    -- Ponto 4: desce até o chão da porta
     local p4 = finalPos
 
-    tweenPara(hrp, p1, lookAt)  -- 1. sobe 200
-    tweenPara(hrp, p2, lookAt)  -- 2. vai por cima
-    tweenPara(hrp, p3, lookAt)  -- 3. desce até 150 acima
-    tweenPara(hrp, p4, lookAt)  -- 4. desce até o chão
+    tweenPara(hrp, p1, lookAt)
+    tweenPara(hrp, p2, lookAt)
+    tweenPara(hrp, p3, lookAt)
+    tweenPara(hrp, p4, lookAt)
 end
 
 local tpRunning = false
