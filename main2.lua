@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v15 (teleporte por cima: sobe 100 → vai até destino → desce)
+    ESP + HUD — v16 (com controle de HoldDuration do ProximityPrompt)
 ]]
 
 local Players = game:GetService("Players")
@@ -27,7 +27,7 @@ local CONFIG = {
     ToggleKey     = Enum.KeyCode.E,
     ScanInterval  = 2,
     TeleportOffset = 5,
-    -- Velocidade: studs por segundo
+    -- Velocidade
     TeleportSpeed = 300,
     MinSpeed      = 1,
     MaxSpeed      = 1000,
@@ -35,7 +35,10 @@ local CONFIG = {
     StepSize      = 4,
     StepDelay     = 0.03,
     -- Altura do voo
-    FlyHeight     = 100, -- studs acima do chão
+    FlyHeight     = 100,
+    -- ✅ HoldDuration
+    ReduceHold    = true,
+    HoldValue     = 0.1,
 }
 
 -- =========================================================
@@ -62,7 +65,7 @@ reopenBtn.Parent = gui
 local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(1, 0); rbc.Parent = reopenBtn
 
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 320, 0, 480)
+panel.Size = UDim2.new(0, 320, 0, 570)
 panel.Position = UDim2.new(0, 10, 0, 80)
 panel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 panel.BackgroundTransparency = 0.1
@@ -249,19 +252,111 @@ for i, preset in ipairs(presets) do
     end)
 end
 
-local status = Instance.new("TextLabel")
-status.Size = UDim2.new(1, -20, 0, 18)
-status.Position = UDim2.new(0, 10, 0, 232)
-status.BackgroundTransparency = 1
-status.Text = ""
-status.TextColor3 = Color3.fromRGB(150, 255, 150)
-status.Font = Enum.Font.GothamSemibold
-status.TextSize = 12
-status.TextXAlignment = Enum.TextXAlignment.Left
-status.Parent = panel
+-- =========================================================
+-- ✅ HOLD DURATION TOGGLE + INPUT
+-- =========================================================
+local holdSep = Instance.new("Frame")
+holdSep.Size = UDim2.new(1, -20, 0, 1)
+holdSep.Position = UDim2.new(0, 10, 0, 238)
+holdSep.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+holdSep.BackgroundTransparency = 0.85
+holdSep.BorderSizePixel = 0
+holdSep.Parent = panel
+
+local holdTitle = Instance.new("TextLabel")
+holdTitle.Size = UDim2.new(1, -20, 0, 18)
+holdTitle.Position = UDim2.new(0, 10, 0, 248)
+holdTitle.BackgroundTransparency = 1
+holdTitle.Text = "HOLD DURATION (segurar E)"
+holdTitle.TextColor3 = Color3.fromRGB(255, 200, 100)
+holdTitle.Font = Enum.Font.GothamBold
+holdTitle.TextSize = 11
+holdTitle.TextXAlignment = Enum.TextXAlignment.Left
+holdTitle.Parent = panel
+
+-- Toggle on/off
+local holdToggle = Instance.new("TextButton")
+holdToggle.Size = UDim2.new(0.5, -15, 0, 30)
+holdToggle.Position = UDim2.new(0, 10, 0, 270)
+holdToggle.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
+holdToggle.BorderSizePixel = 0
+holdToggle.Font = Enum.Font.GothamBold
+holdToggle.TextSize = 11
+holdToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+holdToggle.Text = "HOLD: ON"
+holdToggle.Parent = panel
+local htcc = Instance.new("UICorner"); htcc.CornerRadius = UDim.new(0, 6); htcc.Parent = holdToggle
+
+-- Input de valor
+local holdInput = Instance.new("TextBox")
+holdInput.Size = UDim2.new(0.5, -15, 0, 30)
+holdInput.Position = UDim2.new(0.5, 5, 0, 270)
+holdInput.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+holdInput.BorderSizePixel = 0
+holdInput.Font = Enum.Font.GothamBold
+holdInput.TextSize = 12
+holdInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+holdInput.PlaceholderText = "0.1"
+holdInput.Text = tostring(CONFIG.HoldValue)
+holdInput.Parent = panel
+local hic = Instance.new("UICorner"); hic.CornerRadius = UDim.new(0, 6); hic.Parent = holdInput
+
+local holdStroke = Instance.new("UIStroke")
+holdStroke.Color = Color3.fromRGB(150, 80, 255)
+holdStroke.Thickness = 1
+holdStroke.Transparency = 0.5
+holdStroke.Parent = holdInput
+
+local holdHint = Instance.new("TextLabel")
+holdHint.Size = UDim2.new(1, -20, 0, 16)
+holdHint.Position = UDim2.new(0, 10, 0, 304)
+holdHint.BackgroundTransparency = 1
+holdHint.Text = "⚡ tempo em segundos (0.1 = quase instantâneo)"
+holdHint.TextColor3 = Color3.fromRGB(150, 150, 170)
+holdHint.Font = Enum.Font.Gotham
+holdHint.TextSize = 10
+holdHint.TextXAlignment = Enum.TextXAlignment.Left
+holdHint.Parent = panel
 
 -- =========================================================
--- SLIDER
+-- LÓGICA DO HOLD
+-- =========================================================
+local function aplicarHold()
+    for model in pairs(doorESPs) do
+        for _, d in ipairs(model:GetDescendants()) do
+            if d:IsA("ProximityPrompt") then
+                if CONFIG.ReduceHold then
+                    d.HoldDuration = CONFIG.HoldValue
+                else
+                    -- Restaura pro valor "original" (7s padrão)
+                    d.HoldDuration = 7
+                end
+            end
+        end
+    end
+end
+
+holdToggle.MouseButton1Click:Connect(function()
+    CONFIG.ReduceHold = not CONFIG.ReduceHold
+    holdToggle.Text = CONFIG.ReduceHold and "HOLD: ON" or "HOLD: OFF"
+    TweenService:Create(holdToggle, TweenInfo.new(0.2), {
+        BackgroundColor3 = CONFIG.ReduceHold and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
+    }):Play()
+    aplicarHold()
+end)
+
+holdInput.FocusLost:Connect(function()
+    local valor = tonumber(holdInput.Text)
+    if valor and valor >= 0 and valor <= 10 then
+        CONFIG.HoldValue = valor
+        aplicarHold()
+    else
+        holdInput.Text = tostring(CONFIG.HoldValue)
+    end
+end)
+
+-- =========================================================
+-- SLIDER VELOCIDADE
 -- =========================================================
 local function setSpeedFromRel(rel)
     rel = math.clamp(rel, 0, 1)
@@ -497,6 +592,8 @@ local function refreshDoors()
         end
     end
     doorCount = #found
+    -- ✅ Aplica hold em portas recém-descobertas
+    if CONFIG.ReduceHold then aplicarHold() end
 end
 
 -- =========================================================
@@ -605,7 +702,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE POR CIMA (sobe → vai → desce)
+-- TELEPORTE POR CIMA
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -629,7 +726,6 @@ end
 
 local tpRunning = false
 
--- ✅ Move suavemente de A pra B usando PivotTo em passos
 local function moverSuave(char, fromPos, toPos, speed, lookAt)
     local distancia = (toPos - fromPos).Magnitude
     if distancia < 0.1 then return end
@@ -670,87 +766,3 @@ tpBtn.MouseButton1Click:Connect(function()
     end
 
     local nearest = getNearestDoor()
-    if not nearest then
-        status.Text = "❌ Nenhuma HalloweenDoor encontrada"
-        status.TextColor3 = Color3.fromRGB(255, 100, 100)
-        task.delay(2, function() status.Text = "" end)
-        return
-    end
-
-    local doorPos = nearest.part.Position
-    local direction = (hrp.Position - doorPos).Unit
-    if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
-    local finalPos = doorPos + direction * CONFIG.TeleportOffset + Vector3.new(0, 3, 0)
-    local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
-
-    local startPos = hrp.Position
-    local alturaVoo = startPos.Y + CONFIG.FlyHeight
-
-    -- ✅ Pontos do trajeto: start → subir → ir por cima → descer
-    local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)  -- sobe
-    local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)  -- voa por cima
-    local p3 = finalPos                                         -- desce
-
-    local distanciaTotal = (p1 - startPos).Magnitude
-                         + (p2 - p1).Magnitude
-                         + (p3 - p2).Magnitude
-    local tempoEstimado = distanciaTotal / CONFIG.TeleportSpeed
-
-    tpRunning = true
-    tpBtn.Active = false
-    tpBtn.Text = "⏳ ..."
-    status.Text = string.format("✈️ Voando por cima (%.0f studs)...", distanciaTotal)
-    status.TextColor3 = Color3.fromRGB(255, 200, 100)
-
-    task.spawn(function()
-        -- ✅ 1. Sobe 100 studs
-        moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
-
-        -- ✅ 2. Vai horizontal até a posição XZ do destino (no ar)
-        moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
-
-        -- ✅ 3. Desce até o destino
-        moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
-
-        -- Garante posição final
-        pcall(function()
-            char:PivotTo(CFrame.new(finalPos, lookAt))
-        end)
-
-        status.Text = string.format("✅ Chegou (%.0f studs)", distanciaTotal)
-        status.TextColor3 = Color3.fromRGB(150, 255, 150)
-        tpBtn.Active = true
-        tpBtn.Text = "⚡ TELEPORTAR"
-        task.delay(2.5, function() status.Text = "" end)
-        tpRunning = false
-    end)
-end)
-
--- =========================================================
--- FECHAR / REABRIR
--- =========================================================
-closeBtn.MouseButton1Click:Connect(function()
-    panel.Visible = false
-    reopenBtn.Visible = true
-    reopenBtn.Position = panel.Position
-end)
-
-reopenBtn.MouseButton1Click:Connect(function()
-    panel.Visible = true
-    reopenBtn.Visible = false
-end)
-
--- =========================================================
--- INIT
--- =========================================================
-refreshPlayers()
-refreshDoors()
-updateInfo()
-
-task.spawn(function()
-    while task.wait(CONFIG.ScanInterval) do
-        refreshPlayers()
-        refreshDoors()
-        updateInfo()
-    end
-end)
