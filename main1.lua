@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v18 (teleporta + ativa porta automaticamente)
+    ESP + HUD — v19 (teleporta + ativa porta no mesmo frame, sem soltar)
 ]]
 
 local Players = game:GetService("Players")
@@ -39,9 +39,9 @@ local CONFIG = {
     -- HoldDuration
     ReduceHold    = true,
     HoldValue     = 0.1,
-    -- ✅ Auto-ativar porta ao chegar
+    -- Auto-ativar porta
     AutoFire      = true,
-    FireDelay     = 0.3,  -- espera 0.3s após chegar pra disparar
+    ManterPosicao = 0.5, -- segundos re-fixando posição após disparar
 }
 
 -- =========================================================
@@ -255,9 +255,7 @@ for i, preset in ipairs(presets) do
     end)
 end
 
--- =========================================================
 -- HOLD DURATION
--- =========================================================
 local holdSep = Instance.new("Frame")
 holdSep.Size = UDim2.new(1, -20, 0, 1)
 holdSep.Position = UDim2.new(0, 10, 0, 238)
@@ -319,9 +317,7 @@ holdHint.TextSize = 10
 holdHint.TextXAlignment = Enum.TextXAlignment.Left
 holdHint.Parent = panel
 
--- =========================================================
--- AUTO FIRE TOGGLE
--- =========================================================
+-- AUTO FIRE
 local autoFireSep = Instance.new("Frame")
 autoFireSep.Size = UDim2.new(1, -20, 0, 1)
 autoFireSep.Position = UDim2.new(0, 10, 0, 326)
@@ -354,7 +350,7 @@ status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = panel
 
 -- =========================================================
--- LÓGICA DO HOLD
+-- HOLD LOGIC
 -- =========================================================
 local holdMonitors = {}
 
@@ -433,9 +429,6 @@ holdInput.FocusLost:Connect(function()
     end
 end)
 
--- =========================================================
--- AUTO FIRE
--- =========================================================
 autoFireToggle.MouseButton1Click:Connect(function()
     CONFIG.AutoFire = not CONFIG.AutoFire
     autoFireToggle.Text = CONFIG.AutoFire and "AUTO-FIRE: ON (ativa porta ao chegar)"
@@ -446,7 +439,7 @@ autoFireToggle.MouseButton1Click:Connect(function()
 end)
 
 -- =========================================================
--- SLIDER VELOCIDADE
+-- SLIDER
 -- =========================================================
 local function setSpeedFromRel(rel)
     rel = math.clamp(rel, 0, 1)
@@ -491,7 +484,7 @@ end)
 setSpeedFromRel((CONFIG.TeleportSpeed - CONFIG.MinSpeed) / (CONFIG.MaxSpeed - CONFIG.MinSpeed))
 
 -- =========================================================
--- DRAG DO PAINEL
+-- DRAG PAINEL
 -- =========================================================
 local dragging, dragStart, startPos = false, nil, nil
 
@@ -757,8 +750,7 @@ local function setDoorEnabled(state)
             d.highlight.Enabled = false
             d.nameT.setVisible(false); d.distT.setVisible(false)
         end
-    end
-end
+    endend
 
 local function setPlayerEnabled(state)
     playerEnabled = state
@@ -791,7 +783,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE + AUTO-FIRE
+-- TELEPORTE + AUTO-FIRE (sem soltar)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -813,7 +805,6 @@ local function getNearestDoor()
     return nearest
 end
 
--- ✅ Acha o ProximityPrompt dentro da porta
 local function getPromptFromDoor(doorModel)
     for _, d in ipairs(doorModel:GetDescendants()) do
         if d:IsA("ProximityPrompt") then
@@ -821,38 +812,6 @@ local function getPromptFromDoor(doorModel)
         end
     end
     return nil
-end
-
--- ✅ Dispara o prompt
-local function ativarPorta(doorModel)
-    local prompt = getPromptFromDoor(doorModel)
-    if not prompt then
-        return false, "sem prompt"
-    end
-
-    -- Tenta fireproximityprompt
-    if fireproximityprompt then
-        local ok, err = pcall(function()
-            fireproximityprompt(prompt)
-        end)
-        if ok then
-            return true, "fireproximityprompt"
-        else
-            return false, tostring(err)
-        end
-    end
-
-    -- Fallback: dispara InputHold (simula segurar E)
-    local ok, err = pcall(function()
-        prompt:InputHoldBegin()
-        task.wait(0.1)
-        prompt:InputHoldEnd()
-    end)
-    if ok then
-        return true, "InputHold"
-    else
-        return false, tostring(err)
-    end
 end
 
 local tpRunning = false
@@ -928,35 +887,59 @@ tpBtn.MouseButton1Click:Connect(function()
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
     task.spawn(function()
+        -- Voando por cima
         moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
         moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
         moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
 
+        -- Chegou
         pcall(function()
             char:PivotTo(CFrame.new(finalPos, lookAt))
         end)
 
         if CONFIG.ReduceHold then aplicarHold() end
 
-        status.Text = string.format("✅ Chegou (%.0f studs)", distanciaTotal)
-        status.TextColor3 = Color3.fromRGB(150, 255, 150)
-
-        -- ✅ AUTO-FIRE: dispara o prompt ao chegar
+        -- ✅ AUTO-FIRE SEM SOLTAR: dispara IMEDIATAMENTE
         if CONFIG.AutoFire then
-            status.Text = string.format("✅ Chegou → ativando porta em %.1fs...", CONFIG.FireDelay)
-            task.wait(CONFIG.FireDelay)
+            local prompt = getPromptFromDoor(nearest.model)
+            if prompt then
+                -- Garante hold
+                if CONFIG.ReduceHold then
+                    pcall(function()
+                        prompt.HoldDuration = CONFIG.HoldValue
+                    end)
+                end
 
-            -- Reaplica hold antes de disparar (garante)
-            if CONFIG.ReduceHold then aplicarHold() end
+                -- Dispara no mesmo frame
+                if fireproximityprompt then
+                    pcall(function() fireproximityprompt(prompt) end)
+                else
+                    pcall(function()
+                        prompt:InputHoldBegin()
+                        prompt:InputHoldEnd()
+                    end)
+                end
 
-            local ok, metodo = ativarPorta(nearest.model)
-            if ok then
-                status.Text = "🔥 Porta ativada! (" .. metodo .. ")"
+                -- ✅ Continua re-fixando posição pra evitar rubber band
+                local manterAte = tick() + CONFIG.ManterPosicao
+                while tick() < manterAte do
+                    if char and char.Parent and hrp and hrp.Parent then
+                        pcall(function()
+                            char:PivotTo(CFrame.new(finalPos, lookAt))
+                        end)
+                    end
+                    task.wait(0.03)
+                end
+
+                status.Text = "🔥 Porta ativada!"
                 status.TextColor3 = Color3.fromRGB(150, 255, 150)
             else
-                status.Text = "⚠️ Falha: " .. metodo
+                status.Text = "⚠️ Prompt não encontrado"
                 status.TextColor3 = Color3.fromRGB(255, 180, 100)
             end
+        else
+            status.Text = string.format("✅ Chegou (%.0f studs)", distanciaTotal)
+            status.TextColor3 = Color3.fromRGB(150, 255, 150)
         end
 
         tpBtn.Active = true
