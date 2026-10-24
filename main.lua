@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v14 (teleporte com noclip temporário)
+    ESP + HUD — v15 (teleporte por cima: sobe 100 → vai até destino → desce)
 ]]
 
 local Players = game:GetService("Players")
@@ -34,6 +34,8 @@ local CONFIG = {
     -- Teleporte em passos
     StepSize      = 4,
     StepDelay     = 0.03,
+    -- Altura do voo
+    FlyHeight     = 100, -- studs acima do chão
 }
 
 -- =========================================================
@@ -603,7 +605,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE COM NOCLIP TEMPORÁRIO
+-- TELEPORTE POR CIMA (sobe → vai → desce)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -626,51 +628,33 @@ local function getNearestDoor()
 end
 
 local tpRunning = false
-local colisoesDesativadas = {}
 
-local function desativarColisaoNoCaminho(startPos, endPos, char)
-    colisoesDesativadas = {}
-
-    local direction = endPos - startPos
-    local distancia = direction.Magnitude
+-- ✅ Move suavemente de A pra B usando PivotTo em passos
+local function moverSuave(char, fromPos, toPos, speed, lookAt)
+    local distancia = (toPos - fromPos).Magnitude
     if distancia < 0.1 then return end
-    local unit = direction.Unit
 
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    rayParams.FilterDescendantsInstances = {char}
-    rayParams.IgnoreWater = true
+    local stepSize = math.max(2, speed * CONFIG.StepDelay)
+    stepSize = math.min(stepSize, CONFIG.StepSize * 3)
 
-    local posAtual = startPos
-    local restante = distancia
+    local passos = math.ceil(distancia / stepSize)
+    local direcao = (toPos - fromPos).Unit
+    local atual = fromPos
 
-    while restante > 0.1 do
-        local step = math.min(restante, 8)
-        local result = Workspace:Raycast(posAtual, unit * step, rayParams)
-        if result and result.Instance then
-            local hit = result.Instance
-            if hit:IsA("BasePart") and hit.CanCollide then
-                hit.CanCollide = false
-                colisoesDesativadas[hit] = true
-            end
-            posAtual = result.Position + unit * 0.5
-            restante = (endPos - posAtual).Magnitude
-        else
-            posAtual = posAtual + unit * step
-            restante = restante - step
-        end
-    end
-end
-
-local function restaurarColisoes()
-    for part in pairs(colisoesDesativadas) do
-        if part and part.Parent then
+    for i = 1, passos do
+        if not char or not char.Parent then break end
+        if (toPos - atual).Magnitude < stepSize then
             pcall(function()
-                part.CanCollide = true
+                char:PivotTo(CFrame.new(toPos, lookAt or (toPos + direcao)))
             end)
+            return
         end
+        atual = atual + direcao * stepSize
+        pcall(function()
+            char:PivotTo(CFrame.new(atual, lookAt or (atual + direcao)))
+        end)
+        task.wait(CONFIG.StepDelay)
     end
-    colisoesDesativadas = {}
 end
 
 tpBtn.MouseButton1Click:Connect(function()
@@ -697,77 +681,43 @@ tpBtn.MouseButton1Click:Connect(function()
     local direction = (hrp.Position - doorPos).Unit
     if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
     local finalPos = doorPos + direction * CONFIG.TeleportOffset + Vector3.new(0, 3, 0)
-    local startPos = hrp.Position
     local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
-    local distancia = (finalPos - startPos).Magnitude
 
-    if distancia < 0.5 then
-        status.Text = "✅ Já está na porta"
-        status.TextColor3 = Color3.fromRGB(150, 255, 150)
-        task.delay(2, function() status.Text = "" end)
-        return
-    end
+    local startPos = hrp.Position
+    local alturaVoo = startPos.Y + CONFIG.FlyHeight
+
+    -- ✅ Pontos do trajeto: start → subir → ir por cima → descer
+    local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)  -- sobe
+    local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)  -- voa por cima
+    local p3 = finalPos                                         -- desce
+
+    local distanciaTotal = (p1 - startPos).Magnitude
+                         + (p2 - p1).Magnitude
+                         + (p3 - p2).Magnitude
+    local tempoEstimado = distanciaTotal / CONFIG.TeleportSpeed
 
     tpRunning = true
     tpBtn.Active = false
     tpBtn.Text = "⏳ ..."
-    status.Text = "🚶 Preparando caminho..."
+    status.Text = string.format("✈️ Voando por cima (%.0f studs)...", distanciaTotal)
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
     task.spawn(function()
-        -- 1. Desativa colisão no caminho
-        local ok, err = pcall(function()
-            desativarColisaoNoCaminho(startPos, finalPos, char)
-        end)
-        if not ok then
-            warn("Erro desativando colisão:", err)
-        end
+        -- ✅ 1. Sobe 100 studs
+        moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
 
-        -- 2. Step teleport
-        local stepSize = math.max(2, CONFIG.TeleportSpeed * CONFIG.StepDelay)
-        stepSize = math.min(stepSize, CONFIG.StepSize * 3)
+        -- ✅ 2. Vai horizontal até a posição XZ do destino (no ar)
+        moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
 
-        local direcao = finalPos - startPos
-        local dirHorizontal = Vector3.new(direcao.X, 0, direcao.Z)
-        if dirHorizontal.Magnitude < 0.1 then
-            dirHorizontal = Vector3.new(0, 0, 1)
-        else
-            dirHorizontal = dirHorizontal.Unit
-        end
+        -- ✅ 3. Desce até o destino
+        moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
 
-        local atual = startPos
-        local passos = 0
-        local maxPassos = math.ceil(distancia / 1) + 100
-
-        while passos < maxPassos do
-            if not char or not char.Parent or not hrp or not hrp.Parent then break end
-
-            local restante = (finalPos - atual).Magnitude
-            if restante < stepSize then
-                pcall(function()
-                    char:PivotTo(CFrame.new(finalPos, lookAt))
-                end)
-                break
-            end
-
-            atual = atual + dirHorizontal * stepSize
-            pcall(function()
-                char:PivotTo(CFrame.new(atual, lookAt))
-            end)
-
-            passos = passos + 1
-            task.wait(CONFIG.StepDelay)
-        end
-
-        -- 3. Garante posição final
+        -- Garante posição final
         pcall(function()
             char:PivotTo(CFrame.new(finalPos, lookAt))
         end)
 
-        -- 4. Restaura colisões
-        restaurarColisoes()
-
-        status.Text = string.format("✅ Chegou (%d passos)", passos)
+        status.Text = string.format("✅ Chegou (%.0f studs)", distanciaTotal)
         status.TextColor3 = Color3.fromRGB(150, 255, 150)
         tpBtn.Active = true
         tpBtn.Text = "⚡ TELEPORTAR"
