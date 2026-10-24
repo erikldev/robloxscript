@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v19 (teleporta + ativa porta no mesmo frame, sem soltar)
+    ESP + HUD — v20 (corrigido, sem erro de sintaxe)
 ]]
 
 local Players = game:GetService("Players")
@@ -247,7 +247,6 @@ for i, preset in ipairs(presets) do
     end)
 end
 
--- HOLD DURATION
 local holdSep = Instance.new("Frame")
 holdSep.Size = UDim2.new(1, -20, 0, 1)
 holdSep.Position = UDim2.new(0, 10, 0, 238)
@@ -309,7 +308,6 @@ holdHint.TextSize = 10
 holdHint.TextXAlignment = Enum.TextXAlignment.Left
 holdHint.Parent = panel
 
--- AUTO FIRE
 local autoFireSep = Instance.new("Frame")
 autoFireSep.Size = UDim2.new(1, -20, 0, 1)
 autoFireSep.Position = UDim2.new(0, 10, 0, 326)
@@ -743,7 +741,9 @@ local function setDoorEnabled(state)
             d.nameT.setVisible(false); d.distT.setVisible(false)
         end
     end
-endlocal function setPlayerEnabled(state)
+end
+
+local function setPlayerEnabled(state)
     playerEnabled = state
     playerBtn.Text = playerEnabled and "PLAYER: ON" or "PLAYER: OFF"
     TweenService:Create(playerBtn, TweenInfo.new(0.2), {
@@ -774,7 +774,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE + AUTO-FIRE (sem soltar)
+-- TELEPORTE + AUTO-FIRE
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
