@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v10 (com slider de velocidade do teleporte)
+    ESP + HUD — v11 (ESP players + velocidade em studs/s)
 ]]
 
 local Players = game:GetService("Players")
@@ -13,15 +13,24 @@ local camera = Workspace.CurrentCamera
 local HAS_DRAWING = (Drawing ~= nil)
 
 local CONFIG = {
+    -- Door ESP
     DoorColor     = Color3.fromRGB(255, 80, 80),
     DoorFill      = 0.95,
     DoorMaxDist   = 800,
     DoorMinDist   = 15,
+    DoorName      = "HalloweenDoor",
+    -- Player ESP
+    PlayerColor   = Color3.fromRGB(80, 180, 255),
+    PlayerFill    = 0.7,
+    PlayerMaxDist = 2000,
+    -- Geral
     ToggleKey     = Enum.KeyCode.E,
     ScanInterval  = 2,
     TeleportOffset = 5,
-    DoorName      = "HalloweenDoor",
-    TeleportSpeed = 0.5, -- 0.0 = instantâneo, 1.0 = 2 segundos
+    -- Velocidade: studs por segundo (1 = 1 stud/s; 300 = 300 studs/s)
+    TeleportSpeed = 300,
+    MinSpeed      = 1,
+    MaxSpeed      = 1000,
 }
 
 -- =========================================================
@@ -50,7 +59,7 @@ local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(1, 0); rbc.Par
 
 -- Painel
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 320, 0, 420)
+panel.Size = UDim2.new(0, 320, 0, 480)
 panel.Position = UDim2.new(0, 10, 0, 80)
 panel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 panel.BackgroundTransparency = 0.1
@@ -60,7 +69,7 @@ panel.Parent = gui
 local pc = Instance.new("UICorner"); pc.CornerRadius = UDim.new(0, 10); pc.Parent = panel
 local ps = Instance.new("UIStroke"); ps.Color = Color3.fromRGB(255, 80, 80); ps.Thickness = 1.5; ps.Transparency = 0.3; ps.Parent = panel
 
--- Cabeçalho (área de arrastar)
+-- Cabeçalho
 local header = Instance.new("Frame")
 header.Size = UDim2.new(1, 0, 0, 34)
 header.BackgroundTransparency = 1
@@ -97,25 +106,37 @@ local info = Instance.new("TextLabel")
 info.Size = UDim2.new(1, -20, 0, 18)
 info.Position = UDim2.new(0, 10, 0, 38)
 info.BackgroundTransparency = 1
-info.Text = "Doors: 0"
+info.Text = "Doors: 0 | Players: 0"
 info.TextColor3 = Color3.fromRGB(200, 200, 210)
 info.Font = Enum.Font.Gotham
 info.TextSize = 12
 info.TextXAlignment = Enum.TextXAlignment.Left
 info.Parent = panel
 
--- Toggle DOOR
+-- Toggles
 local doorBtn = Instance.new("TextButton")
-doorBtn.Size = UDim2.new(1, -20, 0, 30)
+doorBtn.Size = UDim2.new(0.5, -15, 0, 30)
 doorBtn.Position = UDim2.new(0, 10, 0, 62)
 doorBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
 doorBtn.BorderSizePixel = 0
 doorBtn.Font = Enum.Font.GothamBold
-doorBtn.TextSize = 12
+doorBtn.TextSize = 11
 doorBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-doorBtn.Text = "DOOR ESP: ON"
+doorBtn.Text = "DOOR: ON"
 doorBtn.Parent = panel
 local dc = Instance.new("UICorner"); dc.CornerRadius = UDim.new(0, 6); dc.Parent = doorBtn
+
+local playerBtn = Instance.new("TextButton")
+playerBtn.Size = UDim2.new(0.5, -15, 0, 30)
+playerBtn.Position = UDim2.new(0.5, 5, 0, 62)
+playerBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
+playerBtn.BorderSizePixel = 0
+playerBtn.Font = Enum.Font.GothamBold
+playerBtn.TextSize = 11
+playerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+playerBtn.Text = "PLAYER: ON"
+playerBtn.Parent = panel
+local plc = Instance.new("UICorner"); plc.CornerRadius = UDim.new(0, 6); plc.Parent = playerBtn
 
 -- Botão RECARREGAR
 local reloadBtn = Instance.new("TextButton")
@@ -144,20 +165,20 @@ tpBtn.Parent = panel
 local tpc = Instance.new("UICorner"); tpc.CornerRadius = UDim.new(0, 6); tpc.Parent = tpBtn
 
 -- =========================================================
--- SLIDER DE VELOCIDADE
+-- SLIDER DE VELOCIDADE (studs/s)
 -- =========================================================
 local speedLabel = Instance.new("TextLabel")
 speedLabel.Size = UDim2.new(1, -20, 0, 18)
 speedLabel.Position = UDim2.new(0, 10, 0, 145)
 speedLabel.BackgroundTransparency = 1
-speedLabel.Text = "VELOCIDADE: 0.50s"
+speedLabel.Text = "VELOCIDADE: 300 studs/s"
 speedLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
 speedLabel.Font = Enum.Font.GothamBold
 speedLabel.TextSize = 12
 speedLabel.TextXAlignment = Enum.TextXAlignment.Left
 speedLabel.Parent = panel
 
--- Barra do slider (fundo)
+-- Barra do slider
 local sliderBg = Instance.new("Frame")
 sliderBg.Size = UDim2.new(1, -20, 0, 8)
 sliderBg.Position = UDim2.new(0, 10, 0, 168)
@@ -166,25 +187,22 @@ sliderBg.BorderSizePixel = 0
 sliderBg.Parent = panel
 local sbgC = Instance.new("UICorner"); sbgC.CornerRadius = UDim.new(1, 0); sbgC.Parent = sliderBg
 
--- Preenchimento (parte colorida)
 local sliderFill = Instance.new("Frame")
-sliderFill.Size = UDim2.new(0.5, 0, 1, 0) -- 0.5 = 50% (metade)
+sliderFill.Size = UDim2.new(0.3, 0, 1, 0)
 sliderFill.BackgroundColor3 = Color3.fromRGB(150, 80, 255)
 sliderFill.BorderSizePixel = 0
 sliderFill.Parent = sliderBg
 local sfc = Instance.new("UICorner"); sfc.CornerRadius = UDim.new(1, 0); sfc.Parent = sliderFill
 
--- Bolinha (indicador)
 local sliderKnob = Instance.new("Frame")
 sliderKnob.Size = UDim2.new(0, 18, 0, 18)
-sliderKnob.Position = UDim2.new(0.5, -9, 0.5, -9)
+sliderKnob.Position = UDim2.new(0.3, -9, 0.5, -9)
 sliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 sliderKnob.BorderSizePixel = 0
 sliderKnob.ZIndex = 2
 sliderKnob.Parent = sliderBg
 local skc = Instance.new("UICorner"); skc.CornerRadius = UDim.new(1, 0); skc.Parent = sliderKnob
 
--- Botão invisível que cobre a barra pra capturar clique/arrastar
 local sliderHit = Instance.new("TextButton")
 sliderHit.Size = UDim2.new(1, 0, 0, 24)
 sliderHit.Position = UDim2.new(0, 0, 0.5, -12)
@@ -193,22 +211,58 @@ sliderHit.Text = ""
 sliderHit.ZIndex = 3
 sliderHit.Parent = sliderBg
 
--- Explicação
+-- Hint embaixo do slider
 local speedHint = Instance.new("TextLabel")
 speedHint.Size = UDim2.new(1, -20, 0, 16)
 speedHint.Position = UDim2.new(0, 10, 0, 182)
 speedHint.BackgroundTransparency = 1
-speedHint.Text = "← brusco   |   suave →"
+speedHint.Text = string.format("%d         %d         %d studs/s",
+    CONFIG.MinSpeed, math.floor((CONFIG.MinSpeed + CONFIG.MaxSpeed) / 2), CONFIG.MaxSpeed)
 speedHint.TextColor3 = Color3.fromRGB(150, 150, 170)
 speedHint.Font = Enum.Font.Gotham
 speedHint.TextSize = 10
 speedHint.TextXAlignment = Enum.TextXAlignment.Center
 speedHint.Parent = panel
 
+-- Botões de preset (rápido)
+local presets = {
+    { label = "LENTO", speed = 50 },
+    { label = "NORMAL", speed = 300 },
+    { label = "RÁPIDO", speed = 1000 },
+}
+
+local presetFrame = Instance.new("Frame")
+presetFrame.Size = UDim2.new(1, -20, 0, 26)
+presetFrame.Position = UDim2.new(0, 10, 0, 200)
+presetFrame.BackgroundTransparency = 1
+presetFrame.Parent = panel
+
+for i, preset in ipairs(presets) do
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1/3, -4, 1, 0)
+    b.Position = UDim2.new((i-1)/3, 2, 0, 0)
+    b.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    b.BorderSizePixel = 0
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 10
+    b.TextColor3 = Color3.fromRGB(255, 255, 255)
+    b.Text = preset.label
+    b.Parent = presetFrame
+    local bcc = Instance.new("UICorner"); bcc.CornerRadius = UDim.new(0, 5); bcc.Parent = b
+    b.MouseButton1Click:Connect(function()
+        CONFIG.TeleportSpeed = preset.speed
+        local rel = (preset.speed - CONFIG.MinSpeed) / (CONFIG.MaxSpeed - CONFIG.MinSpeed)
+        rel = math.clamp(rel, 0, 1)
+        sliderFill.Size = UDim2.new(rel, 0, 1, 0)
+        sliderKnob.Position = UDim2.new(rel, -9, 0.5, -9)
+        speedLabel.Text = string.format("VELOCIDADE: %d studs/s", preset.speed)
+    end)
+end
+
 -- Status
 local status = Instance.new("TextLabel")
 status.Size = UDim2.new(1, -20, 0, 18)
-status.Position = UDim2.new(0, 10, 0, 202)
+status.Position = UDim2.new(0, 10, 0, 232)
 status.BackgroundTransparency = 1
 status.Text = ""
 status.TextColor3 = Color3.fromRGB(150, 255, 150)
@@ -220,33 +274,20 @@ status.Parent = panel
 -- =========================================================
 -- LÓGICA DO SLIDER
 -- =========================================================
-local function setSpeed(value)
-    -- value: 0 = instantâneo, 1 = 2 segundos (clamp)
-    value = math.clamp(value, 0, 1)
-    CONFIG.TeleportSpeed = value
-
-    -- Duração real: 0 → 0s (brusco), 1 → 2s (suave)
-    local duracao = value * 2
-
-    -- Atualiza UI
-    sliderFill.Size = UDim2.new(value, 0, 1, 0)
-    sliderKnob.Position = UDim2.new(value, -9, 0.5, -9)
-
-    if duracao < 0.05 then
-        speedLabel.Text = "VELOCIDADE: INSTANTÂNEO ⚡"
-        speedLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
-    else
-        speedLabel.Text = string.format("VELOCIDADE: %.2fs", duracao)
-        speedLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
-    end
+local function setSpeedFromRel(rel)
+    rel = math.clamp(rel, 0, 1)
+    local speed = math.floor(CONFIG.MinSpeed + (CONFIG.MaxSpeed - CONFIG.MinSpeed) * rel)
+    CONFIG.TeleportSpeed = speed
+    sliderFill.Size = UDim2.new(rel, 0, 1, 0)
+    sliderKnob.Position = UDim2.new(rel, -9, 0.5, -9)
+    speedLabel.Text = string.format("VELOCIDADE: %d studs/s", speed)
 end
 
 local function updateFromX(mouseX)
     local barAbsX = sliderBg.AbsolutePosition.X
     local barW = sliderBg.AbsoluteSize.X
     if barW <= 0 then return end
-    local rel = (mouseX - barAbsX) / barW
-    setSpeed(rel)
+    setSpeedFromRel((mouseX - barAbsX) / barW)
 end
 
 local draggingSlider = false
@@ -273,8 +314,8 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- Inicializa em 0.5
-setSpeed(CONFIG.TeleportSpeed)
+-- Inicializa slider em 300 (que é 30% do range 1-1000)
+setSpeedFromRel((CONFIG.TeleportSpeed - CONFIG.MinSpeed) / (CONFIG.MaxSpeed - CONFIG.MinSpeed))
 
 -- =========================================================
 -- DRAG DO PAINEL
@@ -346,6 +387,47 @@ local function makeText(text, color, size)
             setText = function(t) lbl.Text = t end,
             remove = function() bb:Destroy() end,
         }
+    end
+end
+
+-- =========================================================
+-- PLAYER ESP
+-- =========================================================
+local playerESPs = {}
+local playerEnabled = true
+
+local function createPlayerESP(target)
+    local hl = Instance.new("Highlight")
+    hl.FillColor = CONFIG.PlayerColor
+    hl.OutlineColor = CONFIG.PlayerColor
+    hl.FillTransparency = CONFIG.PlayerFill
+    hl.OutlineTransparency = 0
+    hl.Adornee = target.Character
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent = gui
+    local nameT = makeText(target.Name, CONFIG.PlayerColor, 14)
+    local distT = makeText("", Color3.fromRGB(180, 220, 255), 12)
+    return { highlight = hl, nameT = nameT, distT = distT, target = target }
+end
+
+local function destroyPlayerESP(d)
+    if d.highlight then d.highlight:Destroy() end
+    if d.nameT then d.nameT.remove() end
+    if d.distT then d.distT.remove() end
+end
+
+local function refreshPlayers()
+    for pl, d in pairs(playerESPs) do
+        if not pl.Parent or not pl.Character then
+            destroyPlayerESP(d); playerESPs[pl] = nil
+        else
+            d.highlight.Adornee = pl.Character
+        end
+    end
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= player and pl.Character and not playerESPs[pl] then
+            playerESPs[pl] = createPlayerESP(pl)
+        end
     end
 end
 
@@ -433,6 +515,31 @@ end
 -- LOOP
 -- =========================================================
 RunService.RenderStepped:Connect(function()
+    if playerEnabled then
+        for pl, d in pairs(playerESPs) do
+            local char = pl.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                d.highlight.Adornee = char
+                d.highlight.Enabled = true
+                local pos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+                local dist = (camera.CFrame.Position - hrp.Position).Magnitude
+                local vis = onScreen and dist <= CONFIG.PlayerMaxDist
+                d.nameT.setVisible(vis); d.distT.setVisible(vis)
+                if vis then
+                    if d.nameT.kind == "drawing" then
+                        d.nameT.setPosition(Vector2.new(pos.X, pos.Y - 30))
+                        d.distT.setPosition(Vector2.new(pos.X, pos.Y + 4))
+                    end
+                    d.distT.setText(string.format("[%d]", math.floor(dist)))
+                end
+            else
+                d.highlight.Enabled = false
+                d.nameT.setVisible(false); d.distT.setVisible(false)
+            end
+        end
+    end
+
     if doorEnabled then
         local myPos = camera.CFrame.Position
         for model, d in pairs(doorESPs) do
@@ -459,15 +566,16 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- =========================================================
--- TOGGLE
+-- TOGGLES
 -- =========================================================
 local function updateInfo()
-    info.Text = string.format("Doors: %d", doorCount)
+    info.Text = string.format("Doors: %d | Players: %d",
+        doorCount, math.max(0, #Players:GetPlayers() - 1))
 end
 
 local function setDoorEnabled(state)
     doorEnabled = state
-    doorBtn.Text = doorEnabled and "DOOR ESP: ON" or "DOOR ESP: OFF"
+    doorBtn.Text = doorEnabled and "DOOR: ON" or "DOOR: OFF"
     TweenService:Create(doorBtn, TweenInfo.new(0.2), {
         BackgroundColor3 = doorEnabled and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
     }):Play()
@@ -479,14 +587,29 @@ local function setDoorEnabled(state)
     end
 end
 
+local function setPlayerEnabled(state)
+    playerEnabled = state
+    playerBtn.Text = playerEnabled and "PLAYER: ON" or "PLAYER: OFF"
+    TweenService:Create(playerBtn, TweenInfo.new(0.2), {
+        BackgroundColor3 = playerEnabled and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
+    }):Play()
+    if not playerEnabled then
+        for _, d in pairs(playerESPs) do
+            d.highlight.Enabled = false
+            d.nameT.setVisible(false); d.distT.setVisible(false)
+        end
+    end
+end
+
 reloadBtn.MouseButton1Click:Connect(function()
-    refreshDoors(); updateInfo()
+    refreshDoors(); refreshPlayers(); updateInfo()
     status.Text = "🔄 Recarregado"
     status.TextColor3 = Color3.fromRGB(150, 255, 150)
     task.delay(2, function() status.Text = "" end)
 end)
 
 doorBtn.MouseButton1Click:Connect(function() setDoorEnabled(not doorEnabled) end)
+playerBtn.MouseButton1Click:Connect(function() setPlayerEnabled(not playerEnabled) end)
 
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
@@ -494,7 +617,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE (com velocidade ajustável)
+-- TELEPORTE (velocidade em studs/s)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -544,30 +667,32 @@ tpBtn.MouseButton1Click:Connect(function()
     local finalPos = doorPos + direction * CONFIG.TeleportOffset + Vector3.new(0, 3, 0)
     local targetCFrame = CFrame.new(finalPos, Vector3.new(doorPos.X, finalPos.Y, doorPos.Z))
 
-    local duracao = CONFIG.TeleportSpeed * 2
+    -- ✅ Duração = distância / velocidade
+    local distancia = (finalPos - hrp.Position).Magnitude
+    local duracao = distancia / math.max(CONFIG.TeleportSpeed, 1)
 
     if duracao < 0.05 then
-        -- Instantâneo
+        -- Muito rápido: teleporte instantâneo
         hrp.CFrame = targetCFrame
-        status.Text = string.format("⚡ Teleportado (%.0f studs)", nearest.dist)
+        status.Text = string.format("⚡ Teleportado (%.0f studs)", distancia)
         status.TextColor3 = Color3.fromRGB(150, 255, 150)
         task.delay(2, function() status.Text = "" end)
     else
-        -- Suave (tween)
         tpRunning = true
         tpBtn.Active = false
         tpBtn.Text = "⏳ ..."
-        status.Text = string.format("⚡ Teleportando (%.1fs)...", duracao)
+        status.Text = string.format("⚡ %d studs/s — %.0f studs em %.1fs",
+            CONFIG.TeleportSpeed, distancia, duracao)
         status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
         local tween = TweenService:Create(
             hrp,
-            TweenInfo.new(duracao, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            TweenInfo.new(duracao, Enum.EasingStyle.Linear), -- Linear = velocidade constante
             { CFrame = targetCFrame }
         )
         tween:Play()
         tween.Completed:Connect(function()
-            status.Text = string.format("✅ Chegou (%.0f studs)", nearest.dist)
+            status.Text = string.format("✅ Chegou (%.0f studs)", distancia)
             status.TextColor3 = Color3.fromRGB(150, 255, 150)
             tpBtn.Active = true
             tpBtn.Text = "⚡ TELEPORTAR"
@@ -594,11 +719,13 @@ end)
 -- =========================================================
 -- INIT
 -- =========================================================
+refreshPlayers()
 refreshDoors()
 updateInfo()
 
 task.spawn(function()
     while task.wait(CONFIG.ScanInterval) do
+        refreshPlayers()
         refreshDoors()
         updateInfo()
     end
