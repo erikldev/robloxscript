@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v17 (teleporte restaurado + HoldDuration em descendentes)
+    ESP + HUD — v18 (teleporta + ativa porta automaticamente)
 ]]
 
 local Players = game:GetService("Players")
@@ -36,9 +36,12 @@ local CONFIG = {
     StepDelay     = 0.03,
     -- Altura do voo
     FlyHeight     = 100,
-    -- ✅ HoldDuration
+    -- HoldDuration
     ReduceHold    = true,
     HoldValue     = 0.1,
+    -- ✅ Auto-ativar porta ao chegar
+    AutoFire      = true,
+    FireDelay     = 0.3,  -- espera 0.3s após chegar pra disparar
 }
 
 -- =========================================================
@@ -65,7 +68,7 @@ reopenBtn.Parent = gui
 local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(1, 0); rbc.Parent = reopenBtn
 
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 320, 0, 570)
+panel.Size = UDim2.new(0, 320, 0, 610)
 panel.Position = UDim2.new(0, 10, 0, 80)
 panel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 panel.BackgroundTransparency = 0.1
@@ -316,9 +319,32 @@ holdHint.TextSize = 10
 holdHint.TextXAlignment = Enum.TextXAlignment.Left
 holdHint.Parent = panel
 
+-- =========================================================
+-- AUTO FIRE TOGGLE
+-- =========================================================
+local autoFireSep = Instance.new("Frame")
+autoFireSep.Size = UDim2.new(1, -20, 0, 1)
+autoFireSep.Position = UDim2.new(0, 10, 0, 326)
+autoFireSep.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+autoFireSep.BackgroundTransparency = 0.85
+autoFireSep.BorderSizePixel = 0
+autoFireSep.Parent = panel
+
+local autoFireToggle = Instance.new("TextButton")
+autoFireToggle.Size = UDim2.new(1, -20, 0, 30)
+autoFireToggle.Position = UDim2.new(0, 10, 0, 336)
+autoFireToggle.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
+autoFireToggle.BorderSizePixel = 0
+autoFireToggle.Font = Enum.Font.GothamBold
+autoFireToggle.TextSize = 11
+autoFireToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+autoFireToggle.Text = "AUTO-FIRE: ON (ativa porta ao chegar)"
+autoFireToggle.Parent = panel
+local afc = Instance.new("UICorner"); afc.CornerRadius = UDim.new(0, 6); afc.Parent = autoFireToggle
+
 local status = Instance.new("TextLabel")
 status.Size = UDim2.new(1, -20, 0, 18)
-status.Position = UDim2.new(0, 10, 0, 330)
+status.Position = UDim2.new(0, 10, 0, 370)
 status.BackgroundTransparency = 1
 status.Text = ""
 status.TextColor3 = Color3.fromRGB(150, 255, 150)
@@ -328,9 +354,9 @@ status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = panel
 
 -- =========================================================
--- LÓGICA DO HOLD (com monitor de reset)
+-- LÓGICA DO HOLD
 -- =========================================================
-local holdMonitors = {} -- [prompt] = true
+local holdMonitors = {}
 
 local function aplicarHoldEmPrompt(prompt)
     if not prompt or not prompt.Parent then return end
@@ -342,13 +368,10 @@ local function aplicarHoldEmPrompt(prompt)
 end
 
 local function aplicarHold()
-    -- Varre TODOS os descendentes do Workspace
-    -- (não confia em doorESPs, porque a porta pode não estar lá ainda)
     for _, d in ipairs(Workspace:GetDescendants()) do
         if d:IsA("ProximityPrompt") then
-            -- Verifica se está dentro de uma HalloweenDoor (subindo a árvore)
-            local estaNaPorta = false
             local pai = d
+            local estaNaPorta = false
             for _ = 1, 10 do
                 pai = pai.Parent
                 if not pai then break end
@@ -362,7 +385,6 @@ local function aplicarHold()
                 aplicarHoldEmPrompt(d)
                 if not holdMonitors[d] then
                     holdMonitors[d] = true
-                    -- Monitor: se o server resetar, reaplica
                     d:GetPropertyChangedSignal("HoldDuration"):Connect(function()
                         if CONFIG.ReduceHold and d.HoldDuration ~= CONFIG.HoldValue then
                             task.wait(0.05)
@@ -399,7 +421,6 @@ holdInput.FocusLost:Connect(function()
     if valor and valor >= 0 and valor <= 10 then
         CONFIG.HoldValue = valor
         if CONFIG.ReduceHold then
-            -- Reaplica em todos os monitors
             for prompt in pairs(holdMonitors) do
                 aplicarHoldEmPrompt(prompt)
             end
@@ -410,6 +431,18 @@ holdInput.FocusLost:Connect(function()
     else
         holdInput.Text = tostring(CONFIG.HoldValue)
     end
+end)
+
+-- =========================================================
+-- AUTO FIRE
+-- =========================================================
+autoFireToggle.MouseButton1Click:Connect(function()
+    CONFIG.AutoFire = not CONFIG.AutoFire
+    autoFireToggle.Text = CONFIG.AutoFire and "AUTO-FIRE: ON (ativa porta ao chegar)"
+                                          or "AUTO-FIRE: OFF (só teleporta)"
+    TweenService:Create(autoFireToggle, TweenInfo.new(0.2), {
+        BackgroundColor3 = CONFIG.AutoFire and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
+    }):Play()
 end)
 
 -- =========================================================
@@ -758,7 +791,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE POR CIMA (voo: sobe → vai → desce)
+-- TELEPORTE + AUTO-FIRE
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -778,6 +811,48 @@ local function getNearestDoor()
         end
     end
     return nearest
+end
+
+-- ✅ Acha o ProximityPrompt dentro da porta
+local function getPromptFromDoor(doorModel)
+    for _, d in ipairs(doorModel:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            return d
+        end
+    end
+    return nil
+end
+
+-- ✅ Dispara o prompt
+local function ativarPorta(doorModel)
+    local prompt = getPromptFromDoor(doorModel)
+    if not prompt then
+        return false, "sem prompt"
+    end
+
+    -- Tenta fireproximityprompt
+    if fireproximityprompt then
+        local ok, err = pcall(function()
+            fireproximityprompt(prompt)
+        end)
+        if ok then
+            return true, "fireproximityprompt"
+        else
+            return false, tostring(err)
+        end
+    end
+
+    -- Fallback: dispara InputHold (simula segurar E)
+    local ok, err = pcall(function()
+        prompt:InputHoldBegin()
+        task.wait(0.1)
+        prompt:InputHoldEnd()
+    end)
+    if ok then
+        return true, "InputHold"
+    else
+        return false, tostring(err)
+    end
 end
 
 local tpRunning = false
@@ -849,7 +924,7 @@ tpBtn.MouseButton1Click:Connect(function()
     tpRunning = true
     tpBtn.Active = false
     tpBtn.Text = "⏳ ..."
-    status.Text = string.format("✈️ Voando por cima (%.0f studs)...", distanciaTotal)
+    status.Text = string.format("✈️ Voando (%.0f studs)...", distanciaTotal)
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
     task.spawn(function()
@@ -861,14 +936,32 @@ tpBtn.MouseButton1Click:Connect(function()
             char:PivotTo(CFrame.new(finalPos, lookAt))
         end)
 
-        -- Reaplica hold (a porta pode ter mudado)
-        aplicarHold()
+        if CONFIG.ReduceHold then aplicarHold() end
 
         status.Text = string.format("✅ Chegou (%.0f studs)", distanciaTotal)
         status.TextColor3 = Color3.fromRGB(150, 255, 150)
+
+        -- ✅ AUTO-FIRE: dispara o prompt ao chegar
+        if CONFIG.AutoFire then
+            status.Text = string.format("✅ Chegou → ativando porta em %.1fs...", CONFIG.FireDelay)
+            task.wait(CONFIG.FireDelay)
+
+            -- Reaplica hold antes de disparar (garante)
+            if CONFIG.ReduceHold then aplicarHold() end
+
+            local ok, metodo = ativarPorta(nearest.model)
+            if ok then
+                status.Text = "🔥 Porta ativada! (" .. metodo .. ")"
+                status.TextColor3 = Color3.fromRGB(150, 255, 150)
+            else
+                status.Text = "⚠️ Falha: " .. metodo
+                status.TextColor3 = Color3.fromRGB(255, 180, 100)
+            end
+        end
+
         tpBtn.Active = true
         tpBtn.Text = "⚡ TELEPORTAR"
-        task.delay(2.5, function() status.Text = "" end)
+        task.delay(3, function() status.Text = "" end)
         tpRunning = false
     end)
 end)
@@ -895,7 +988,6 @@ refreshDoors()
 updateInfo()
 aplicarHold()
 
--- Loop de refresh (portas + players + hold)
 task.spawn(function()
     while task.wait(CONFIG.ScanInterval) do
         refreshPlayers()
