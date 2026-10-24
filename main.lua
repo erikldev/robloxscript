@@ -1,5 +1,14 @@
 --[[
-    ESP + HUD — v28 (teleporte gruda na porta até soltar)
+    ESP + HUD — v30 (DEFINITIVA)
+    Features:
+    - ESP de HalloweenDoor e Players
+    - Teleporte com TweenService (velocidade adaptativa)
+    - Grude (re-fixa posição até soltar)
+    - Trazer porta até você (com fallback)
+    - Auto-hold (fireproximityprompt)
+    - Noclip toggle
+    - Anti-AFK
+    - HoldDuration ajustável
 ]]
 
 local Players = game:GetService("Players")
@@ -7,6 +16,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local VirtualUser = game:GetService("VirtualUser")
 
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
@@ -24,22 +34,39 @@ local CONFIG = {
     ToggleKey     = Enum.KeyCode.E,
     ScanInterval  = 2,
     TeleportOffset = 5,
-    TeleportSpeed = 300,
-    MinSpeed      = 1,
-    MaxSpeed      = 1000,
-    StepSize      = 4,
-    StepDelay     = 0.03,
+    -- Velocidades adaptativas (Blox Fruits style)
+    SpeedVeryClose = 1000,
+    SpeedClose     = 350,
+    SpeedMedium    = 350,
+    SpeedFar       = 300,
+    -- Voo por baixo
+    UsarVooBaixo  = true,
     FlyHeight     = 100,
+    -- Hold
     ReduceHold    = true,
     HoldValue     = 0.1,
     AutoFire      = true,
     AutoHold      = true,
     AutoHoldRange = 15,
     NoclipEnabled = false,
+    AntiAFK       = true,
 }
 
 -- =========================================================
--- ESTADO GLOBAL DO "GRUDE"
+-- ANTI-AFK
+-- =========================================================
+if CONFIG.AntiAFK then
+    for _, v in pairs(getconnections(player.Idled)) do
+        v:Disable()
+    end
+    player.Idled:Connect(function()
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end)
+end
+
+-- =========================================================
+-- ESTADO GLOBAL
 -- =========================================================
 local grudado = false
 local posGrude = nil
@@ -58,7 +85,7 @@ gui.Parent = player:WaitForChild("PlayerGui")
 
 local reopenBtn = Instance.new("TextButton")
 reopenBtn.Size = UDim2.new(0, 50, 0, 50)
-reopenBtn.Position = UDim2.new(0, 10, 0, 80)
+reopenBtn.Position = UDim2.new(0, 10, 0, 60)
 reopenBtn.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
 reopenBtn.BorderSizePixel = 0
 reopenBtn.Font = Enum.Font.GothamBold
@@ -70,8 +97,8 @@ reopenBtn.Parent = gui
 local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(1, 0); rbc.Parent = reopenBtn
 
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 320, 0, 720)
-panel.Position = UDim2.new(0, 10, 0, 80)
+panel.Size = UDim2.new(0, 320, 0, 800)
+panel.Position = UDim2.new(0, 10, 0, 60)
 panel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 panel.BackgroundTransparency = 0.1
 panel.BorderSizePixel = 0
@@ -120,6 +147,7 @@ info.TextSize = 12
 info.TextXAlignment = Enum.TextXAlignment.Left
 info.Parent = panel
 
+-- Toggles DOOR/PLAYER
 local doorBtn = Instance.new("TextButton")
 doorBtn.Size = UDim2.new(0.5, -15, 0, 30)
 doorBtn.Position = UDim2.new(0, 10, 0, 62)
@@ -144,52 +172,77 @@ playerBtn.Text = "PLAYER: ON"
 playerBtn.Parent = panel
 local plc = Instance.new("UICorner"); plc.CornerRadius = UDim.new(0, 6); plc.Parent = playerBtn
 
+-- Botões de ação
 local reloadBtn = Instance.new("TextButton")
-reloadBtn.Size = UDim2.new(0.5, -15, 0, 34)
+reloadBtn.Size = UDim2.new(0.5, -15, 0, 32)
 reloadBtn.Position = UDim2.new(0, 10, 0, 100)
 reloadBtn.BackgroundColor3 = Color3.fromRGB(255, 160, 60)
 reloadBtn.BorderSizePixel = 0
 reloadBtn.Font = Enum.Font.GothamBold
-reloadBtn.TextSize = 12
+reloadBtn.TextSize = 11
 reloadBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 reloadBtn.Text = "🔄 RECARREGAR"
 reloadBtn.Parent = panel
 local rlc = Instance.new("UICorner"); rlc.CornerRadius = UDim.new(0, 6); rlc.Parent = reloadBtn
 
--- ✅ Botão GRUDAR/SOLTAR
 local grudeBtn = Instance.new("TextButton")
-grudeBtn.Size = UDim2.new(0.5, -15, 0, 34)
+grudeBtn.Size = UDim2.new(0.5, -15, 0, 32)
 grudeBtn.Position = UDim2.new(0.5, 5, 0, 100)
 grudeBtn.BackgroundColor3 = Color3.fromRGB(150, 80, 255)
 grudeBtn.BorderSizePixel = 0
 grudeBtn.Font = Enum.Font.GothamBold
-grudeBtn.TextSize = 12
+grudeBtn.TextSize = 11
 grudeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-grudeBtn.Text = "⚡ GRUDAR NA PORTA"
+grudeBtn.Text = "⚡ GRUDAR"
 grudeBtn.Parent = panel
 local gdc = Instance.new("UICorner"); gdc.CornerRadius = UDim.new(0, 6); gdc.Parent = grudeBtn
 
+local trazerBtn = Instance.new("TextButton")
+trazerBtn.Size = UDim2.new(0.5, -15, 0, 32)
+trazerBtn.Position = UDim2.new(0, 10, 0, 138)
+trazerBtn.BackgroundColor3 = Color3.fromRGB(80, 160, 255)
+trazerBtn.BorderSizePixel = 0
+trazerBtn.Font = Enum.Font.GothamBold
+trazerBtn.TextSize = 11
+trazerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+trazerBtn.Text = "📦 TRAZER PORTA"
+trazerBtn.Parent = panel
+local tzc = Instance.new("UICorner"); tzc.CornerRadius = UDim.new(0, 6); tzc.Parent = trazerBtn
+
+local teleportarBtn = Instance.new("TextButton")
+teleportarBtn.Size = UDim2.new(0.5, -15, 0, 32)
+teleportarBtn.Position = UDim2.new(0.5, 5, 0, 138)
+teleportarBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 150)
+teleportarBtn.BorderSizePixel = 0
+teleportarBtn.Font = Enum.Font.GothamBold
+teleportarBtn.TextSize = 11
+teleportarBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+teleportarBtn.Text = "✈️ VOAR ATÉ"
+teleportarBtn.Parent = panel
+local tlc = Instance.new("UICorner"); tlc.CornerRadius = UDim.new(0, 6); tlc.Parent = teleportarBtn
+
+-- Velocidade
 local speedLabel = Instance.new("TextLabel")
-speedLabel.Size = UDim2.new(1, -20, 0, 18)
-speedLabel.Position = UDim2.new(0, 10, 0, 145)
+speedLabel.Size = UDim2.new(1, -20, 0, 16)
+speedLabel.Position = UDim2.new(0, 10, 0, 178)
 speedLabel.BackgroundTransparency = 1
-speedLabel.Text = "VELOCIDADE: 300 studs/s"
+speedLabel.Text = "VELOCIDADE: adaptativa"
 speedLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
 speedLabel.Font = Enum.Font.GothamBold
-speedLabel.TextSize = 12
+speedLabel.TextSize = 10
 speedLabel.TextXAlignment = Enum.TextXAlignment.Left
 speedLabel.Parent = panel
 
 local sliderBg = Instance.new("Frame")
 sliderBg.Size = UDim2.new(1, -20, 0, 8)
-sliderBg.Position = UDim2.new(0, 10, 0, 168)
+sliderBg.Position = UDim2.new(0, 10, 0, 198)
 sliderBg.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 sliderBg.BorderSizePixel = 0
 sliderBg.Parent = panel
 local sbgC = Instance.new("UICorner"); sbgC.CornerRadius = UDim.new(1, 0); sbgC.Parent = sliderBg
 
 local sliderFill = Instance.new("Frame")
-sliderFill.Size = UDim2.new(0.3, 0, 1, 0)
+sliderFill.Size = UDim2.new(0.5, 0, 1, 0)
 sliderFill.BackgroundColor3 = Color3.fromRGB(150, 80, 255)
 sliderFill.BorderSizePixel = 0
 sliderFill.Parent = sliderBg
@@ -197,7 +250,7 @@ local sfc = Instance.new("UICorner"); sfc.CornerRadius = UDim.new(1, 0); sfc.Par
 
 local sliderKnob = Instance.new("Frame")
 sliderKnob.Size = UDim2.new(0, 18, 0, 18)
-sliderKnob.Position = UDim2.new(0.3, -9, 0.5, -9)
+sliderKnob.Position = UDim2.new(0.5, -9, 0.5, -9)
 sliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 sliderKnob.BorderSizePixel = 0
 sliderKnob.ZIndex = 2
@@ -212,92 +265,47 @@ sliderHit.Text = ""
 sliderHit.ZIndex = 3
 sliderHit.Parent = sliderBg
 
-local speedHint = Instance.new("TextLabel")
-speedHint.Size = UDim2.new(1, -20, 0, 16)
-speedHint.Position = UDim2.new(0, 10, 0, 182)
-speedHint.BackgroundTransparency = 1
-speedHint.Text = string.format("%d         %d         %d studs/s",
-    CONFIG.MinSpeed, math.floor((CONFIG.MinSpeed + CONFIG.MaxSpeed) / 2), CONFIG.MaxSpeed)
-speedHint.TextColor3 = Color3.fromRGB(150, 150, 170)
-speedHint.Font = Enum.Font.Gotham
-speedHint.TextSize = 10
-speedHint.TextXAlignment = Enum.TextXAlignment.Center
-speedHint.Parent = panel
+-- Separador
+local sep1 = Instance.new("Frame")
+sep1.Size = UDim2.new(1, -20, 0, 1)
+sep1.Position = UDim2.new(0, 10, 0, 220)
+sep1.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+sep1.BackgroundTransparency = 0.85
+sep1.BorderSizePixel = 0
+sep1.Parent = panel
 
-local presets = {
-    { label = "LENTO", speed = 50 },
-    { label = "NORMAL", speed = 300 },
-    { label = "RÁPIDO", speed = 1000 },
-}
-
-local presetFrame = Instance.new("Frame")
-presetFrame.Size = UDim2.new(1, -20, 0, 26)
-presetFrame.Position = UDim2.new(0, 10, 0, 200)
-presetFrame.BackgroundTransparency = 1
-presetFrame.Parent = panel
-
-for i, preset in ipairs(presets) do
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(1/3, -4, 1, 0)
-    b.Position = UDim2.new((i-1)/3, 2, 0, 0)
-    b.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-    b.BorderSizePixel = 0
-    b.Font = Enum.Font.GothamBold
-    b.TextSize = 10
-    b.TextColor3 = Color3.fromRGB(255, 255, 255)
-    b.Text = preset.label
-    b.Parent = presetFrame
-    local bcc = Instance.new("UICorner"); bcc.CornerRadius = UDim.new(0, 5); bcc.Parent = b
-    b.MouseButton1Click:Connect(function()
-        CONFIG.TeleportSpeed = preset.speed
-        local rel = (preset.speed - CONFIG.MinSpeed) / (CONFIG.MaxSpeed - CONFIG.MinSpeed)
-        rel = math.clamp(rel, 0, 1)
-        sliderFill.Size = UDim2.new(rel, 0, 1, 0)
-        sliderKnob.Position = UDim2.new(rel, -9, 0.5, -9)
-        speedLabel.Text = string.format("VELOCIDADE: %d studs/s", preset.speed)
-    end)
-end
-
-local holdSep = Instance.new("Frame")
-holdSep.Size = UDim2.new(1, -20, 0, 1)
-holdSep.Position = UDim2.new(0, 10, 0, 238)
-holdSep.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-holdSep.BackgroundTransparency = 0.85
-holdSep.BorderSizePixel = 0
-holdSep.Parent = panel
-
+-- Hold
 local holdTitle = Instance.new("TextLabel")
-holdTitle.Size = UDim2.new(1, -20, 0, 18)
-holdTitle.Position = UDim2.new(0, 10, 0, 248)
+holdTitle.Size = UDim2.new(1, -20, 0, 16)
+holdTitle.Position = UDim2.new(0, 10, 0, 228)
 holdTitle.BackgroundTransparency = 1
-holdTitle.Text = "HOLD DURATION (segurar E)"
+holdTitle.Text = "HOLD DURATION"
 holdTitle.TextColor3 = Color3.fromRGB(255, 200, 100)
 holdTitle.Font = Enum.Font.GothamBold
-holdTitle.TextSize = 11
+holdTitle.TextSize = 10
 holdTitle.TextXAlignment = Enum.TextXAlignment.Left
 holdTitle.Parent = panel
 
 local holdToggle = Instance.new("TextButton")
-holdToggle.Size = UDim2.new(0.5, -15, 0, 30)
-holdToggle.Position = UDim2.new(0, 10, 0, 270)
+holdToggle.Size = UDim2.new(0.5, -15, 0, 28)
+holdToggle.Position = UDim2.new(0, 10, 0, 248)
 holdToggle.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
 holdToggle.BorderSizePixel = 0
 holdToggle.Font = Enum.Font.GothamBold
-holdToggle.TextSize = 11
+holdToggle.TextSize = 10
 holdToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
 holdToggle.Text = "HOLD: ON"
 holdToggle.Parent = panel
 local htcc = Instance.new("UICorner"); htcc.CornerRadius = UDim.new(0, 6); htcc.Parent = holdToggle
 
 local holdInput = Instance.new("TextBox")
-holdInput.Size = UDim2.new(0.5, -15, 0, 30)
-holdInput.Position = UDim2.new(0.5, 5, 0, 270)
+holdInput.Size = UDim2.new(0.5, -15, 0, 28)
+holdInput.Position = UDim2.new(0.5, 5, 0, 248)
 holdInput.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
 holdInput.BorderSizePixel = 0
 holdInput.Font = Enum.Font.GothamBold
-holdInput.TextSize = 12
+holdInput.TextSize = 11
 holdInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-holdInput.PlaceholderText = "0.1"
 holdInput.Text = tostring(CONFIG.HoldValue)
 holdInput.Parent = panel
 local hic = Instance.new("UICorner"); hic.CornerRadius = UDim.new(0, 6); hic.Parent = holdInput
@@ -308,82 +316,80 @@ holdStroke.Thickness = 1
 holdStroke.Transparency = 0.5
 holdStroke.Parent = holdInput
 
-local holdHint = Instance.new("TextLabel")
-holdHint.Size = UDim2.new(1, -20, 0, 16)
-holdHint.Position = UDim2.new(0, 10, 0, 304)
-holdHint.BackgroundTransparency = 1
-holdHint.Text = "⚡ segundos (0.1 = instantâneo)"
-holdHint.TextColor3 = Color3.fromRGB(150, 150, 170)
-holdHint.Font = Enum.Font.Gotham
-holdHint.TextSize = 10
-holdHint.TextXAlignment = Enum.TextXAlignment.Left
-holdHint.Parent = panel
+-- Separador 2
+local sep2 = Instance.new("Frame")
+sep2.Size = UDim2.new(1, -20, 0, 1)
+sep2.Position = UDim2.new(0, 10, 0, 286)
+sep2.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+sep2.BackgroundTransparency = 0.85
+sep2.BorderSizePixel = 0
+sep2.Parent = panel
 
-local autoHoldSep = Instance.new("Frame")
-autoHoldSep.Size = UDim2.new(1, -20, 0, 1)
-autoHoldSep.Position = UDim2.new(0, 10, 0, 326)
-autoHoldSep.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-autoHoldSep.BackgroundTransparency = 0.85
-autoHoldSep.BorderSizePixel = 0
-autoHoldSep.Parent = panel
-
+-- Auto hold
 local autoHoldToggle = Instance.new("TextButton")
-autoHoldToggle.Size = UDim2.new(1, -20, 0, 30)
-autoHoldToggle.Position = UDim2.new(0, 10, 0, 336)
+autoHoldToggle.Size = UDim2.new(1, -20, 0, 28)
+autoHoldToggle.Position = UDim2.new(0, 10, 0, 294)
 autoHoldToggle.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
 autoHoldToggle.BorderSizePixel = 0
 autoHoldToggle.Font = Enum.Font.GothamBold
-autoHoldToggle.TextSize = 11
+autoHoldToggle.TextSize = 10
 autoHoldToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
-autoHoldToggle.Text = "AUTO-HOLD: ON (segura E perto da porta)"
+autoHoldToggle.Text = "AUTO-HOLD: ON"
 autoHoldToggle.Parent = panel
 local ahc = Instance.new("UICorner"); ahc.CornerRadius = UDim.new(0, 6); ahc.Parent = autoHoldToggle
 
+-- Noclip
 local noclipToggle = Instance.new("TextButton")
-noclipToggle.Size = UDim2.new(1, -20, 0, 30)
-noclipToggle.Position = UDim2.new(0, 10, 0, 374)
+noclipToggle.Size = UDim2.new(1, -20, 0, 28)
+noclipToggle.Position = UDim2.new(0, 10, 0, 330)
 noclipToggle.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
 noclipToggle.BorderSizePixel = 0
 noclipToggle.Font = Enum.Font.GothamBold
-noclipToggle.TextSize = 11
+noclipToggle.TextSize = 10
 noclipToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
-noclipToggle.Text = "NOCLIP: OFF (remove colisão)"
+noclipToggle.Text = "NOCLIP: OFF"
 noclipToggle.Parent = panel
 local ncc = Instance.new("UICorner"); ncc.CornerRadius = UDim.new(0, 6); ncc.Parent = noclipToggle
 
-local autoFireSep = Instance.new("Frame")
-autoFireSep.Size = UDim2.new(1, -20, 0, 1)
-autoFireSep.Position = UDim2.new(0, 10, 0, 412)
-autoFireSep.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-autoFireSep.BackgroundTransparency = 0.85
-autoFireSep.BorderSizePixel = 0
-autoFireSep.Parent = panel
-
+-- Auto fire
 local autoFireToggle = Instance.new("TextButton")
-autoFireToggle.Size = UDim2.new(1, -20, 0, 30)
-autoFireToggle.Position = UDim2.new(0, 10, 0, 422)
+autoFireToggle.Size = UDim2.new(1, -20, 0, 28)
+autoFireToggle.Position = UDim2.new(0, 10, 0, 366)
 autoFireToggle.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
 autoFireToggle.BorderSizePixel = 0
 autoFireToggle.Font = Enum.Font.GothamBold
-autoFireToggle.TextSize = 11
+autoFireToggle.TextSize = 10
 autoFireToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
-autoFireToggle.Text = "AUTO-FIRE: ON (ativa porta ao chegar)"
+autoFireToggle.Text = "AUTO-FIRE: ON"
 autoFireToggle.Parent = panel
 local afc = Instance.new("UICorner"); afc.CornerRadius = UDim.new(0, 6); afc.Parent = autoFireToggle
 
+-- Voo por baixo
+local vooToggle = Instance.new("TextButton")
+vooToggle.Size = UDim2.new(1, -20, 0, 28)
+vooToggle.Position = UDim2.new(0, 10, 0, 402)
+vooToggle.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
+vooToggle.BorderSizePixel = 0
+vooToggle.Font = Enum.Font.GothamBold
+vooToggle.TextSize = 10
+vooToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+vooToggle.Text = "VOO POR BAIXO: ON"
+vooToggle.Parent = panel
+local vtc = Instance.new("UICorner"); vtc.CornerRadius = UDim.new(0, 6); vtc.Parent = vooToggle
+
 local status = Instance.new("TextLabel")
 status.Size = UDim2.new(1, -20, 0, 18)
-status.Position = UDim2.new(0, 10, 0, 458)
+status.Position = UDim2.new(0, 10, 0, 440)
 status.BackgroundTransparency = 1
 status.Text = ""
 status.TextColor3 = Color3.fromRGB(150, 255, 150)
 status.Font = Enum.Font.GothamSemibold
-status.TextSize = 12
+status.TextSize = 11
 status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = panel
 
 -- =========================================================
--- FUNÇÃO: GRUDAR / SOLTAR
+-- FUNÇÕES DE GRUDE
 -- =========================================================
 local function soltar()
     grudado = false
@@ -393,7 +399,7 @@ local function soltar()
         grudeConn:Disconnect()
         grudeConn = nil
     end
-    grudeBtn.Text = "⚡ GRUDAR NA PORTA"
+    grudeBtn.Text = "⚡ GRUDAR"
     TweenService:Create(grudeBtn, TweenInfo.new(0.2), {
         BackgroundColor3 = Color3.fromRGB(150, 80, 255)
     }):Play()
@@ -404,12 +410,11 @@ local function grudar(char, pos, lookAt)
     grudado = true
     posGrude = pos
     lookGrude = lookAt
-    grudeBtn.Text = "🔓 SOLTAR DA PORTA"
+    grudeBtn.Text = "🔓 SOLTAR"
     TweenService:Create(grudeBtn, TweenInfo.new(0.2), {
         BackgroundColor3 = Color3.fromRGB(60, 200, 100)
     }):Play()
 
-    -- ✅ Loop que re-fixa a posição a cada frame (RunService.Heartbeat)
     grudeConn = RunService.Heartbeat:Connect(function()
         if not grudado then return end
         local c = player.Character
@@ -419,19 +424,9 @@ local function grudar(char, pos, lookAt)
         end)
     end)
 
-    status.Text = "🔒 Grudado na porta! (clica SOLTAR p/ liberar)"
+    status.Text = "🔒 Grudado!"
     status.TextColor3 = Color3.fromRGB(150, 255, 150)
 end
-
-grudeBtn.MouseButton1Click:Connect(function()
-    if grudado then
-        soltar()
-        status.Text = "🔓 Solto da porta"
-        status.TextColor3 = Color3.fromRGB(255, 180, 100)
-        task.delay(2, function() status.Text = "" end)
-    end
-    -- Se não estiver grudado, o botão só faz sentido depois do teleporte
-end)
 
 -- =========================================================
 -- NOCLIP
@@ -453,8 +448,6 @@ local function aplicarNoclip()
                 end
             end
         end)
-        status.Text = "✅ Noclip ATIVADO"
-        status.TextColor3 = Color3.fromRGB(150, 255, 150)
     else
         local c = player.Character
         if c then
@@ -464,16 +457,12 @@ local function aplicarNoclip()
                 end
             end
         end
-        status.Text = "Noclip DESATIVADO"
-        status.TextColor3 = Color3.fromRGB(255, 180, 100)
     end
-    task.delay(2, function() status.Text = "" end)
 end
 
 noclipToggle.MouseButton1Click:Connect(function()
     CONFIG.NoclipEnabled = not CONFIG.NoclipEnabled
-    noclipToggle.Text = CONFIG.NoclipEnabled and "NOCLIP: ON (colisão removida)"
-                                        or "NOCLIP: OFF (remove colisão)"
+    noclipToggle.Text = CONFIG.NoclipEnabled and "NOCLIP: ON" or "NOCLIP: OFF"
     TweenService:Create(noclipToggle, TweenInfo.new(0.2), {
         BackgroundColor3 = CONFIG.NoclipEnabled and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
     }):Play()
@@ -535,15 +524,11 @@ end
 
 autoHoldToggle.MouseButton1Click:Connect(function()
     CONFIG.AutoHold = not CONFIG.AutoHold
-    autoHoldToggle.Text = CONFIG.AutoHold and "AUTO-HOLD: ON (segura E perto da porta)"
-                                        or "AUTO-HOLD: OFF (só teleporta)"
+    autoHoldToggle.Text = CONFIG.AutoHold and "AUTO-HOLD: ON" or "AUTO-HOLD: OFF"
     TweenService:Create(autoHoldToggle, TweenInfo.new(0.2), {
         BackgroundColor3 = CONFIG.AutoHold and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
     }):Play()
-    if CONFIG.AutoHold then
-        iniciarAutoHold()
-        status.Text = "✅ Auto-hold ativado"
-        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+    if CONFIG.AutoHold then iniciarAutoHold()
     else
         if autoHoldConn then autoHoldConn:Disconnect() end
         for _, d in ipairs(Workspace:GetDescendants()) do
@@ -551,10 +536,7 @@ autoHoldToggle.MouseButton1Click:Connect(function()
                 d:SetAttribute("AutoFired", false)
             end
         end
-        status.Text = "Auto-hold desativado"
-        status.TextColor3 = Color3.fromRGB(255, 180, 100)
     end
-    task.delay(2, function() status.Text = "" end)
 end)
 
 -- =========================================================
@@ -565,9 +547,7 @@ local holdMonitors = {}
 local function aplicarHoldEmPrompt(prompt)
     if not prompt or not prompt.Parent then return end
     if CONFIG.ReduceHold then
-        pcall(function()
-            prompt.HoldDuration = CONFIG.HoldValue
-        end)
+        pcall(function() prompt.HoldDuration = CONFIG.HoldValue end)
     end
 end
 
@@ -609,15 +589,7 @@ holdToggle.MouseButton1Click:Connect(function()
     TweenService:Create(holdToggle, TweenInfo.new(0.2), {
         BackgroundColor3 = CONFIG.ReduceHold and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
     }):Play()
-    if CONFIG.ReduceHold then
-        aplicarHold()
-        status.Text = "✅ Hold aplicado em " .. tostring(#holdMonitors) .. " prompts"
-        status.TextColor3 = Color3.fromRGB(150, 255, 150)
-    else
-        status.Text = "Hold desligado (server padrão)"
-        status.TextColor3 = Color3.fromRGB(255, 180, 100)
-    end
-    task.delay(3, function() status.Text = "" end)
+    if CONFIG.ReduceHold then aplicarHold() end
 end)
 
 holdInput.FocusLost:Connect(function()
@@ -628,9 +600,6 @@ holdInput.FocusLost:Connect(function()
             for prompt in pairs(holdMonitors) do
                 aplicarHoldEmPrompt(prompt)
             end
-            status.Text = "Valor: " .. tostring(valor) .. "s aplicado"
-            status.TextColor3 = Color3.fromRGB(150, 255, 150)
-            task.delay(2, function() status.Text = "" end)
         end
     else
         holdInput.Text = tostring(CONFIG.HoldValue)
@@ -639,23 +608,32 @@ end)
 
 autoFireToggle.MouseButton1Click:Connect(function()
     CONFIG.AutoFire = not CONFIG.AutoFire
-    autoFireToggle.Text = CONFIG.AutoFire and "AUTO-FIRE: ON (ativa porta ao chegar)"
-                                          or "AUTO-FIRE: OFF (só teleporta)"
+    autoFireToggle.Text = CONFIG.AutoFire and "AUTO-FIRE: ON" or "AUTO-FIRE: OFF"
     TweenService:Create(autoFireToggle, TweenInfo.new(0.2), {
         BackgroundColor3 = CONFIG.AutoFire and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
     }):Play()
 end)
 
+vooToggle.MouseButton1Click:Connect(function()
+    CONFIG.UsarVooBaixo = not CONFIG.UsarVooBaixo
+    vooToggle.Text = CONFIG.UsarVooBaixo and "VOO POR BAIXO: ON" or "VOO POR BAIXO: OFF"
+    TweenService:Create(vooToggle, TweenInfo.new(0.2), {
+        BackgroundColor3 = CONFIG.UsarVooBaixo and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
+    }):Play()
+end)
+
 -- =========================================================
--- SLIDER
+-- SLIDER VELOCIDADE
 -- =========================================================
 local function setSpeedFromRel(rel)
     rel = math.clamp(rel, 0, 1)
-    local speed = math.floor(CONFIG.MinSpeed + (CONFIG.MaxSpeed - CONFIG.MinSpeed) * rel)
-    CONFIG.TeleportSpeed = speed
+    local mult = 0.2 + rel * 1.8
+    CONFIG.SpeedClose = 350 * mult
+    CONFIG.SpeedMedium = 350 * mult
+    CONFIG.SpeedFar = 300 * mult
     sliderFill.Size = UDim2.new(rel, 0, 1, 0)
     sliderKnob.Position = UDim2.new(rel, -9, 0.5, -9)
-    speedLabel.Text = string.format("VELOCIDADE: %d studs/s", speed)
+    speedLabel.Text = string.format("VELOCIDADE: %d studs/s", math.floor(CONFIG.SpeedFar))
 end
 
 local function updateFromX(mouseX)
@@ -689,7 +667,7 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
-setSpeedFromRel((CONFIG.TeleportSpeed - CONFIG.MinSpeed) / (CONFIG.MaxSpeed - CONFIG.MinSpeed))
+setSpeedFromRel(0.5)
 
 -- =========================================================
 -- DRAG PAINEL
@@ -709,13 +687,7 @@ UserInputService.InputChanged:Connect(function(input)
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
         or input.UserInputType == Enum.UserInputType.Touch) then
         local delta = input.Position - dragStart
-        local newX = startPos.X.Offset + delta.X
-        local newY = startPos.Y.Offset + delta.Y
-        local vp = camera.ViewportSize
-        local panelW = panel.AbsoluteSize.X
-        newX = math.clamp(newX, -panelW + 40, vp.X - 40)
-        newY = math.clamp(newY, 0, vp.Y - 40)
-        panel.Position = UDim2.new(0, newX, 0, newY)
+        panel.Position = UDim2.new(0, startPos.X.Offset + delta.X, 0, startPos.Y.Offset + delta.Y)
     end
 end)
 
@@ -886,7 +858,7 @@ local function refreshDoors()
 end
 
 -- =========================================================
--- LOOP
+-- LOOP ESP
 -- =========================================================
 RunService.RenderStepped:Connect(function()
     if playerEnabled then
@@ -994,7 +966,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE + GRUDE
+-- FUNÇÕES DE TELEPORTE
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -1018,48 +990,44 @@ end
 
 local function getPromptFromDoor(doorModel)
     for _, d in ipairs(doorModel:GetDescendants()) do
-        if d:IsA("ProximityPrompt") then
-            return d
-        end
+        if d:IsA("ProximityPrompt") then return d end
     end
     return nil
 end
 
-local tpRunning = false
-
-local function moverSuave(char, fromPos, toPos, speed, lookAt)
-    local distancia = (toPos - fromPos).Magnitude
-    if distancia < 0.1 then return end
-
-    local stepSize = math.max(2, speed * CONFIG.StepDelay)
-    stepSize = math.min(stepSize, CONFIG.StepSize * 3)
-
-    local passos = math.ceil(distancia / stepSize)
-    local direcao = (toPos - fromPos).Unit
-    local atual = fromPos
-
-    for i = 1, passos do
-        if not char or not char.Parent then break end
-        if (toPos - atual).Magnitude < stepSize then
-            pcall(function()
-                char:PivotTo(CFrame.new(toPos, lookAt or (toPos + direcao)))
-            end)
-            return
-        end
-        atual = atual + direcao * stepSize
-        pcall(function()
-            char:PivotTo(CFrame.new(atual, lookAt or (atual + direcao)))
-        end)
-        task.wait(CONFIG.StepDelay)
-    end
+-- ✅ Velocidade adaptativa (Blox Fruits v2)
+local function calcularVelocidade(distancia)
+    if distancia < 10 then return CONFIG.SpeedVeryClose
+    elseif distancia < 170 then return CONFIG.SpeedClose
+    elseif distancia < 1000 then return CONFIG.SpeedMedium
+    else return CONFIG.SpeedFar end
 end
 
--- ✅ Botão GRUDAR: teleporta, chega na porta e JÁ GRUDA
+-- ✅ Tween direto (igual Blox Fruits v2)
+local function tweenPara(hrp, destino, lookAt)
+    local distancia = (destino - hrp.Position).Magnitude
+    if distancia < 0.1 then return end
+    local velocidade = calcularVelocidade(distancia)
+    local duracao = distancia / velocidade
+
+    local tween = TweenService:Create(
+        hrp,
+        TweenInfo.new(duracao, Enum.EasingStyle.Linear),
+        {CFrame = CFrame.new(destino, lookAt)}
+    )
+    tween:Play()
+    tween.Completed:Wait()
+end
+
+-- =========================================================
+-- BOTÃO GRUDAR (voo por baixo opcional + grude)
+-- =========================================================
+local tpRunning = false
+
 grudeBtn.MouseButton1Click:Connect(function()
-    -- Se já está grudado, solta
     if grudado then
         soltar()
-        status.Text = "🔓 Solto da porta"
+        status.Text = "🔓 Solto"
         status.TextColor3 = Color3.fromRGB(255, 180, 100)
         task.delay(2, function() status.Text = "" end)
         return
@@ -1078,7 +1046,7 @@ grudeBtn.MouseButton1Click:Connect(function()
 
     local nearest = getNearestDoor()
     if not nearest then
-        status.Text = "❌ Nenhuma HalloweenDoor encontrada"
+        status.Text = "❌ Nenhuma porta encontrada"
         status.TextColor3 = Color3.fromRGB(255, 100, 100)
         task.delay(2, function() status.Text = "" end)
         return
@@ -1093,71 +1061,198 @@ grudeBtn.MouseButton1Click:Connect(function()
     local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
 
     local startPos = hrp.Position
-    local alturaVoo = doorPos.Y - CONFIG.FlyHeight
-
-    local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)
-    local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)
-    local p3 = finalPos
-
-    local distanciaTotal = (p1 - startPos).Magnitude
-                         + (p2 - p1).Magnitude
-                         + (p3 - p2).Magnitude
+    local distancia = (finalPos - startPos).Magnitude
 
     tpRunning = true
     grudeBtn.Active = false
-    grudeBtn.Text = "⏳ Voando..."
-    status.Text = string.format("✈️ Voando por baixo (%.0f studs)...", distanciaTotal)
+    grudeBtn.Text = "⏳ ..."
+
+    if CONFIG.UsarVooBaixo then
+        local alturaVoo = doorPos.Y - CONFIG.FlyHeight
+        local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)
+        local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)
+
+        status.Text = "✈️ Voando por baixo..."
+        status.TextColor3 = Color3.fromRGB(255, 200, 100)
+
+        task.spawn(function()
+            tweenPara(hrp, p1, lookAt)
+            tweenPara(hrp, p2, lookAt)
+            tweenPara(hrp, finalPos, lookAt)
+
+            if CONFIG.ReduceHold then aplicarHold() end
+            grudar(char, finalPos, lookAt)
+
+            if CONFIG.AutoFire then
+                local prompt = getPromptFromDoor(nearest.model)
+                if prompt then
+                    if CONFIG.ReduceHold then
+                        pcall(function() prompt.HoldDuration = CONFIG.HoldValue end)
+                    end
+                    if fireproximityprompt then
+                        pcall(function() fireproximityprompt(prompt) end)
+                    else
+                        pcall(function()
+                            prompt:InputHoldBegin()
+                            prompt:InputHoldEnd()
+                        end)
+                    end
+                end
+            end
+
+            status.Text = "🔥 Grudado + ativado!"
+            status.TextColor3 = Color3.fromRGB(150, 255, 150)
+            grudeBtn.Active = true
+            grudeBtn.Text = "🔓 SOLTAR"
+            tpRunning = false
+        end)
+    else
+        status.Text = string.format("⚡ Tween (%.0f studs)...", distancia)
+        status.TextColor3 = Color3.fromRGB(255, 200, 100)
+
+        task.spawn(function()
+            tweenPara(hrp, finalPos, lookAt)
+
+            if CONFIG.ReduceHold then aplicarHold() end
+            grudar(char, finalPos, lookAt)
+
+            if CONFIG.AutoFire then
+                local prompt = getPromptFromDoor(nearest.model)
+                if prompt then
+                    if CONFIG.ReduceHold then
+                        pcall(function() prompt.HoldDuration = CONFIG.HoldValue end)
+                    end
+                    if fireproximityprompt then
+                        pcall(function() fireproximityprompt(prompt) end)
+                    else
+                        pcall(function()
+                            prompt:InputHoldBegin()
+                            prompt:InputHoldEnd()
+                        end)
+                    end
+                end
+            end
+
+            status.Text = "🔥 Grudado + ativado!"
+            status.TextColor3 = Color3.fromRGB(150, 255, 150)
+            grudeBtn.Active = true
+            grudeBtn.Text = "🔓 SOLTAR"
+            tpRunning = false
+        end)
+    end
+end)
+
+-- =========================================================
+-- BOTÃO TRAZER PORTA (com fallback)
+-- =========================================================
+trazerBtn.MouseButton1Click:Connect(function()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        status.Text = "❌ Sem personagem"
+        status.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.delay(2, function() status.Text = "" end)
+        return
+    end
+
+    local nearest = getNearestDoor()
+    if not nearest then
+        status.Text = "❌ Nenhuma porta encontrada"
+        status.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.delay(2, function() status.Text = "" end)
+        return
+    end
+
+    local myPos = hrp.Position
+    local myLook = hrp.CFrame.LookVector
+    local novaPos = myPos + myLook * CONFIG.TeleportOffset + Vector3.new(0, 1, 0)
+    local posOriginal = nearest.part.Position
+
+    -- Tenta mover a porta
+    pcall(function()
+        nearest.model:PivotTo(CFrame.new(novaPos, myPos))
+    end)
+
+    status.Text = "📦 Tentando trazer porta..."
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
-    task.spawn(function()
-        -- Voa por baixo
-        moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
-        moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
-        moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
+    task.wait(0.4)
 
-        -- Cola na porta
-        pcall(function()
-            char:PivotTo(CFrame.new(finalPos, lookAt))
-        end)
+    -- Verifica se ficou perto
+    local dist = (nearest.part.Position - myPos).Magnitude
+    if dist > 15 then
+        -- Porta voltou → teleporta player
+        status.Text = "⚠️ Porta voltou. Voando até ela..."
+        status.TextColor3 = Color3.fromRGB(255, 180, 100)
 
-        if CONFIG.ReduceHold then aplicarHold() end
+        local direction = (hrp.Position - posOriginal).Unit
+        if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
+        local finalPos = posOriginal + direction * CONFIG.TeleportOffset
+        finalPos = Vector3.new(finalPos.X, posOriginal.Y, finalPos.Z)
+        local lookAt = Vector3.new(posOriginal.X, finalPos.Y, posOriginal.Z)
 
-        -- ✅ Ativa o modo GRUDE (re-fixa até soltar)
+        tweenPara(hrp, finalPos, lookAt)
         grudar(char, finalPos, lookAt)
 
-        -- Dispara o prompt
         if CONFIG.AutoFire then
             local prompt = getPromptFromDoor(nearest.model)
             if prompt then
-                if CONFIG.ReduceHold then
-                    pcall(function()
-                        prompt.HoldDuration = CONFIG.HoldValue
-                    end)
-                end
-
                 if fireproximityprompt then
                     pcall(function() fireproximityprompt(prompt) end)
-                else
-                    pcall(function()
-                        prompt:InputHoldBegin()
-                        prompt:InputHoldEnd()
-                    end)
                 end
-
-                status.Text = "🔥 Porta ativada + GRUDADO! Clica SOLTAR p/ liberar"
-                status.TextColor3 = Color3.fromRGB(150, 255, 150)
-            else
-                status.Text = "⚠️ Prompt não encontrado"
-                status.TextColor3 = Color3.fromRGB(255, 180, 100)
             end
-        else
-            status.Text = "🔒 Grudado (clica SOLTAR p/ liberar)"
-            status.TextColor3 = Color3.fromRGB(150, 255, 150)
         end
 
-        grudeBtn.Active = true
-        tpRunning = false
-    end)
+        status.Text = "⚡ Voou até a porta + ativou"
+        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+    else
+        status.Text = "✅ Porta trouxe até você!"
+        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+    end
+    task.delay(3, function() status.Text = "" end)
+end)
+
+-- =========================================================
+-- BOTÃO VOAR ATÉ (só teleporta, sem grude)
+-- =========================================================
+teleportarBtn.MouseButton1Click:Connect(function()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    local nearest = getNearestDoor()
+    if not nearest then
+        status.Text = "❌ Nenhuma porta"
+        status.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.delay(2, function() status.Text = "" end)
+        return
+    end
+
+    local doorPos = nearest.part.Position
+    local direction = (hrp.Position - doorPos).Unit
+    if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
+    local finalPos = doorPos + direction * CONFIG.TeleportOffset
+    finalPos = Vector3.new(finalPos.X, doorPos.Y, finalPos.Z)
+    local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
+
+    status.Text = "✈️ Voando até a porta..."
+    status.TextColor3 = Color3.fromRGB(255, 200, 100)
+
+    tweenPara(hrp, finalPos, lookAt)
+
+    if CONFIG.ReduceHold then aplicarHold() end
+    if CONFIG.AutoFire then
+        local prompt = getPromptFromDoor(nearest.model)
+        if prompt then
+            if fireproximityprompt then
+                pcall(function() fireproximityprompt(prompt) end)
+            end
+        end
+    end
+
+    status.Text = "✅ Chegou + ativou"
+    status.TextColor3 = Color3.fromRGB(150, 255, 150)
+    task.delay(2, function() status.Text = "" end)
 end)
 
 -- =========================================================
