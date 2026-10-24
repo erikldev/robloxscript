@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v24 (auto-hold + noclip + só solta depois de coletar)
+    ESP + HUD — v25 (auto-hold + noclip + só solta depois de coletar) — CORRIGIDO
 ]]
 
 local Players = game:GetService("Players")
@@ -34,11 +34,9 @@ local CONFIG = {
     HoldValue     = 0.1,
     AutoFire      = true,
     ManterPosicao = 1.0,
-    -- ✅ Auto-hold
-    AutoHold      = true,    -- segura E automaticamente ao chegar perto
-    AutoHoldRange = 15,      -- studs de distância pra começar a segurar
-    -- ✅ Noclip
-    NoclipEnabled = false,   -- remove colisão do player
+    AutoHold      = true,
+    AutoHoldRange = 15,
+    NoclipEnabled = false,
 }
 
 -- =========================================================
@@ -313,7 +311,6 @@ holdHint.TextSize = 10
 holdHint.TextXAlignment = Enum.TextXAlignment.Left
 holdHint.Parent = panel
 
--- ✅ AUTO HOLD + NOCLIP
 local autoHoldSep = Instance.new("Frame")
 autoHoldSep.Size = UDim2.new(1, -20, 0, 1)
 autoHoldSep.Position = UDim2.new(0, 10, 0, 326)
@@ -400,7 +397,6 @@ local function aplicarNoclip()
         status.Text = "✅ Noclip ATIVADO"
         status.TextColor3 = Color3.fromRGB(150, 255, 150)
     else
-        -- Restaura colisão
         local c = player.Character
         if c then
             for _, p in ipairs(c:GetDescendants()) do
@@ -426,7 +422,7 @@ noclipToggle.MouseButton1Click:Connect(function()
 end)
 
 -- =========================================================
--- AUTO HOLD (segura o prompt quando perto)
+-- AUTO HOLD
 -- =========================================================
 local autoHoldConn = nil
 
@@ -454,18 +450,15 @@ local function iniciarAutoHold()
                 end
 
                 if estaNaPorta then
-                    -- Verifica distância
                     local promptPart = d.Parent
                     if promptPart and promptPart:IsA("BasePart") then
                         local dist = (hrp.Position - promptPart.Position).Magnitude
                         if dist <= CONFIG.AutoHoldRange then
-                            -- Segura E se ainda não estiver segurando
                             if not d:GetAttribute("AutoHolding") then
                                 d:SetAttribute("AutoHolding", true)
                                 pcall(function() d:InputHoldBegin() end)
                             end
                         else
-                            -- Solta se afastou
                             if d:GetAttribute("AutoHolding") then
                                 d:SetAttribute("AutoHolding", false)
                                 pcall(function() d:InputHoldEnd() end)
@@ -491,7 +484,6 @@ autoHoldToggle.MouseButton1Click:Connect(function()
         status.TextColor3 = Color3.fromRGB(150, 255, 150)
     else
         if autoHoldConn then autoHoldConn:Disconnect() end
-        -- Solta todos os holds
         for _, d in ipairs(Workspace:GetDescendants()) do
             if d:IsA("ProximityPrompt") and d:GetAttribute("AutoHolding") then
                 d:SetAttribute("AutoHolding", false)
@@ -887,7 +879,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- =========================================================
--- TOGGLES
+-- TOGGLES (CORRIGIDO)
 -- =========================================================
 local function updateInfo()
     info.Text = string.format("Doors: %d | Players: %d",
