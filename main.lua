@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v23 (voa 100, desce ao chão da porta, dispara grudado)
+    ESP + HUD — v24 (auto-hold + noclip + só solta depois de coletar)
 ]]
 
 local Players = game:GetService("Players")
@@ -34,6 +34,11 @@ local CONFIG = {
     HoldValue     = 0.1,
     AutoFire      = true,
     ManterPosicao = 1.0,
+    -- ✅ Auto-hold
+    AutoHold      = true,    -- segura E automaticamente ao chegar perto
+    AutoHoldRange = 15,      -- studs de distância pra começar a segurar
+    -- ✅ Noclip
+    NoclipEnabled = false,   -- remove colisão do player
 }
 
 -- =========================================================
@@ -60,7 +65,7 @@ reopenBtn.Parent = gui
 local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(1, 0); rbc.Parent = reopenBtn
 
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 320, 0, 610)
+panel.Size = UDim2.new(0, 320, 0, 680)
 panel.Position = UDim2.new(0, 10, 0, 80)
 panel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 panel.BackgroundTransparency = 0.1
@@ -308,9 +313,42 @@ holdHint.TextSize = 10
 holdHint.TextXAlignment = Enum.TextXAlignment.Left
 holdHint.Parent = panel
 
+-- ✅ AUTO HOLD + NOCLIP
+local autoHoldSep = Instance.new("Frame")
+autoHoldSep.Size = UDim2.new(1, -20, 0, 1)
+autoHoldSep.Position = UDim2.new(0, 10, 0, 326)
+autoHoldSep.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+autoHoldSep.BackgroundTransparency = 0.85
+autoHoldSep.BorderSizePixel = 0
+autoHoldSep.Parent = panel
+
+local autoHoldToggle = Instance.new("TextButton")
+autoHoldToggle.Size = UDim2.new(1, -20, 0, 30)
+autoHoldToggle.Position = UDim2.new(0, 10, 0, 336)
+autoHoldToggle.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
+autoHoldToggle.BorderSizePixel = 0
+autoHoldToggle.Font = Enum.Font.GothamBold
+autoHoldToggle.TextSize = 11
+autoHoldToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+autoHoldToggle.Text = "AUTO-HOLD: ON (segura E perto da porta)"
+autoHoldToggle.Parent = panel
+local ahc = Instance.new("UICorner"); ahc.CornerRadius = UDim.new(0, 6); ahc.Parent = autoHoldToggle
+
+local noclipToggle = Instance.new("TextButton")
+noclipToggle.Size = UDim2.new(1, -20, 0, 30)
+noclipToggle.Position = UDim2.new(0, 10, 0, 374)
+noclipToggle.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+noclipToggle.BorderSizePixel = 0
+noclipToggle.Font = Enum.Font.GothamBold
+noclipToggle.TextSize = 11
+noclipToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+noclipToggle.Text = "NOCLIP: OFF (remove colisão)"
+noclipToggle.Parent = panel
+local ncc = Instance.new("UICorner"); ncc.CornerRadius = UDim.new(0, 6); ncc.Parent = noclipToggle
+
 local autoFireSep = Instance.new("Frame")
 autoFireSep.Size = UDim2.new(1, -20, 0, 1)
-autoFireSep.Position = UDim2.new(0, 10, 0, 326)
+autoFireSep.Position = UDim2.new(0, 10, 0, 412)
 autoFireSep.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 autoFireSep.BackgroundTransparency = 0.85
 autoFireSep.BorderSizePixel = 0
@@ -318,7 +356,7 @@ autoFireSep.Parent = panel
 
 local autoFireToggle = Instance.new("TextButton")
 autoFireToggle.Size = UDim2.new(1, -20, 0, 30)
-autoFireToggle.Position = UDim2.new(0, 10, 0, 336)
+autoFireToggle.Position = UDim2.new(0, 10, 0, 422)
 autoFireToggle.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
 autoFireToggle.BorderSizePixel = 0
 autoFireToggle.Font = Enum.Font.GothamBold
@@ -330,7 +368,7 @@ local afc = Instance.new("UICorner"); afc.CornerRadius = UDim.new(0, 6); afc.Par
 
 local status = Instance.new("TextLabel")
 status.Size = UDim2.new(1, -20, 0, 18)
-status.Position = UDim2.new(0, 10, 0, 370)
+status.Position = UDim2.new(0, 10, 0, 458)
 status.BackgroundTransparency = 1
 status.Text = ""
 status.TextColor3 = Color3.fromRGB(150, 255, 150)
@@ -338,6 +376,133 @@ status.Font = Enum.Font.GothamSemibold
 status.TextSize = 12
 status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = panel
+
+-- =========================================================
+-- NOCLIP
+-- =========================================================
+local noclipConn = nil
+
+local function aplicarNoclip()
+    local char = player.Character
+    if not char then return end
+    if noclipConn then noclipConn:Disconnect() end
+
+    if CONFIG.NoclipEnabled then
+        noclipConn = RunService.Stepped:Connect(function()
+            local c = player.Character
+            if not c then return end
+            for _, p in ipairs(c:GetDescendants()) do
+                if p:IsA("BasePart") and p.CanCollide then
+                    p.CanCollide = false
+                end
+            end
+        end)
+        status.Text = "✅ Noclip ATIVADO"
+        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+    else
+        -- Restaura colisão
+        local c = player.Character
+        if c then
+            for _, p in ipairs(c:GetDescendants()) do
+                if p:IsA("BasePart") and not p.CanCollide then
+                    pcall(function() p.CanCollide = true end)
+                end
+            end
+        end
+        status.Text = "Noclip DESATIVADO"
+        status.TextColor3 = Color3.fromRGB(255, 180, 100)
+    end
+    task.delay(2, function() status.Text = "" end)
+end
+
+noclipToggle.MouseButton1Click:Connect(function()
+    CONFIG.NoclipEnabled = not CONFIG.NoclipEnabled
+    noclipToggle.Text = CONFIG.NoclipEnabled and "NOCLIP: ON (colisão removida)"
+                                        or "NOCLIP: OFF (remove colisão)"
+    TweenService:Create(noclipToggle, TweenInfo.new(0.2), {
+        BackgroundColor3 = CONFIG.NoclipEnabled and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
+    }):Play()
+    aplicarNoclip()
+end)
+
+-- =========================================================
+-- AUTO HOLD (segura o prompt quando perto)
+-- =========================================================
+local autoHoldConn = nil
+
+local function iniciarAutoHold()
+    if autoHoldConn then autoHoldConn:Disconnect() end
+    if not CONFIG.AutoHold then return end
+
+    autoHoldConn = RunService.Heartbeat:Connect(function()
+        if not CONFIG.AutoHold then return end
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+
+        for _, d in ipairs(Workspace:GetDescendants()) do
+            if d:IsA("ProximityPrompt") then
+                local pai = d
+                local estaNaPorta = false
+                for _ = 1, 10 do
+                    pai = pai.Parent
+                    if not pai then break end
+                    if pai.Name == CONFIG.DoorName then
+                        estaNaPorta = true
+                        break
+                    end
+                end
+
+                if estaNaPorta then
+                    -- Verifica distância
+                    local promptPart = d.Parent
+                    if promptPart and promptPart:IsA("BasePart") then
+                        local dist = (hrp.Position - promptPart.Position).Magnitude
+                        if dist <= CONFIG.AutoHoldRange then
+                            -- Segura E se ainda não estiver segurando
+                            if not d:GetAttribute("AutoHolding") then
+                                d:SetAttribute("AutoHolding", true)
+                                pcall(function() d:InputHoldBegin() end)
+                            end
+                        else
+                            -- Solta se afastou
+                            if d:GetAttribute("AutoHolding") then
+                                d:SetAttribute("AutoHolding", false)
+                                pcall(function() d:InputHoldEnd() end)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+autoHoldToggle.MouseButton1Click:Connect(function()
+    CONFIG.AutoHold = not CONFIG.AutoHold
+    autoHoldToggle.Text = CONFIG.AutoHold and "AUTO-HOLD: ON (segura E perto da porta)"
+                                        or "AUTO-HOLD: OFF (só teleporta)"
+    TweenService:Create(autoHoldToggle, TweenInfo.new(0.2), {
+        BackgroundColor3 = CONFIG.AutoHold and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
+    }):Play()
+    if CONFIG.AutoHold then
+        iniciarAutoHold()
+        status.Text = "✅ Auto-hold ativado"
+        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+    else
+        if autoHoldConn then autoHoldConn:Disconnect() end
+        -- Solta todos os holds
+        for _, d in ipairs(Workspace:GetDescendants()) do
+            if d:IsA("ProximityPrompt") and d:GetAttribute("AutoHolding") then
+                d:SetAttribute("AutoHolding", false)
+                pcall(function() d:InputHoldEnd() end)
+            end
+        end
+        status.Text = "Auto-hold desativado"
+        status.TextColor3 = Color3.fromRGB(255, 180, 100)
+    end
+    task.delay(2, function() status.Text = "" end)
+end)
 
 -- =========================================================
 -- HOLD LOGIC
@@ -858,13 +1023,11 @@ tpBtn.MouseButton1Click:Connect(function()
     local direction = (hrp.Position - doorPos).Unit
     if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
 
-    -- ✅ Destino final = chão da porta (sem +3)
     local finalPos = doorPos + direction * CONFIG.TeleportOffset
     finalPos = Vector3.new(finalPos.X, doorPos.Y, finalPos.Z)
     local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
 
     local startPos = hrp.Position
-    -- ✅ Sobe 100 a partir do chão da porta
     local alturaVoo = doorPos.Y + CONFIG.FlyHeight
 
     local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)
@@ -882,21 +1045,16 @@ tpBtn.MouseButton1Click:Connect(function()
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
     task.spawn(function()
-        -- 1. Sobe
         moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
-        -- 2. Vai por cima
         moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
-        -- 3. Desce até o chão da porta
         moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
 
-        -- 4. Cola no chão
         pcall(function()
             char:PivotTo(CFrame.new(finalPos, lookAt))
         end)
 
         if CONFIG.ReduceHold then aplicarHold() end
 
-        -- 5. Dispara grudado
         if CONFIG.AutoFire then
             local prompt = getPromptFromDoor(nearest.model)
             if prompt then
@@ -918,7 +1076,6 @@ tpBtn.MouseButton1Click:Connect(function()
                 status.Text = "🔥 Evento enviado, segurando posição..."
                 status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
-                -- 6. Re-fixa no chão durante processamento
                 local manterAte = tick() + CONFIG.ManterPosicao
                 while tick() < manterAte do
                     if char and char.Parent and hrp and hrp.Parent then
@@ -968,6 +1125,9 @@ refreshPlayers()
 refreshDoors()
 updateInfo()
 aplicarHold()
+
+if CONFIG.AutoHold then iniciarAutoHold() end
+if CONFIG.NoclipEnabled then aplicarNoclip() end
 
 task.spawn(function()
     while task.wait(CONFIG.ScanInterval) do
