@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v11 (ESP players + velocidade em studs/s)
+    ESP + HUD — v12 (teleporte em pequenos passos com PivotTo)
 ]]
 
 local Players = game:GetService("Players")
@@ -27,10 +27,13 @@ local CONFIG = {
     ToggleKey     = Enum.KeyCode.E,
     ScanInterval  = 2,
     TeleportOffset = 5,
-    -- Velocidade: studs por segundo (1 = 1 stud/s; 300 = 300 studs/s)
+    -- Velocidade: studs por segundo
     TeleportSpeed = 300,
     MinSpeed      = 1,
     MaxSpeed      = 1000,
+    -- ✅ Teleporte em passos (anti-cheat friendly)
+    StepSize      = 4,      -- studs por passo (menor = mais seguro)
+    StepDelay     = 0.03,   -- segundos entre passos (menor = mais rápido)
 }
 
 -- =========================================================
@@ -43,7 +46,6 @@ gui.IgnoreGuiInset = true
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = player:WaitForChild("PlayerGui")
 
--- Botão flutuante pra reabrir
 local reopenBtn = Instance.new("TextButton")
 reopenBtn.Size = UDim2.new(0, 50, 0, 50)
 reopenBtn.Position = UDim2.new(0, 10, 0, 80)
@@ -57,7 +59,6 @@ reopenBtn.Visible = false
 reopenBtn.Parent = gui
 local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(1, 0); rbc.Parent = reopenBtn
 
--- Painel
 local panel = Instance.new("Frame")
 panel.Size = UDim2.new(0, 320, 0, 480)
 panel.Position = UDim2.new(0, 10, 0, 80)
@@ -69,14 +70,12 @@ panel.Parent = gui
 local pc = Instance.new("UICorner"); pc.CornerRadius = UDim.new(0, 10); pc.Parent = panel
 local ps = Instance.new("UIStroke"); ps.Color = Color3.fromRGB(255, 80, 80); ps.Thickness = 1.5; ps.Transparency = 0.3; ps.Parent = panel
 
--- Cabeçalho
 local header = Instance.new("Frame")
 header.Size = UDim2.new(1, 0, 0, 34)
 header.BackgroundTransparency = 1
 header.Active = true
 header.Parent = panel
 
--- Título
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -100, 0, 26)
 title.Position = UDim2.new(0, 10, 0, 4)
@@ -88,7 +87,6 @@ title.TextSize = 15
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = header
 
--- Botão FECHAR
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 24, 0, 24)
 closeBtn.Position = UDim2.new(1, -34, 0, 5)
@@ -101,7 +99,6 @@ closeBtn.Text = "✖"
 closeBtn.Parent = header
 local cbc = Instance.new("UICorner"); cbc.CornerRadius = UDim.new(0, 6); cbc.Parent = closeBtn
 
--- Info
 local info = Instance.new("TextLabel")
 info.Size = UDim2.new(1, -20, 0, 18)
 info.Position = UDim2.new(0, 10, 0, 38)
@@ -113,7 +110,6 @@ info.TextSize = 12
 info.TextXAlignment = Enum.TextXAlignment.Left
 info.Parent = panel
 
--- Toggles
 local doorBtn = Instance.new("TextButton")
 doorBtn.Size = UDim2.new(0.5, -15, 0, 30)
 doorBtn.Position = UDim2.new(0, 10, 0, 62)
@@ -138,7 +134,6 @@ playerBtn.Text = "PLAYER: ON"
 playerBtn.Parent = panel
 local plc = Instance.new("UICorner"); plc.CornerRadius = UDim.new(0, 6); plc.Parent = playerBtn
 
--- Botão RECARREGAR
 local reloadBtn = Instance.new("TextButton")
 reloadBtn.Size = UDim2.new(0.5, -15, 0, 34)
 reloadBtn.Position = UDim2.new(0, 10, 0, 100)
@@ -151,7 +146,6 @@ reloadBtn.Text = "🔄 RECARREGAR"
 reloadBtn.Parent = panel
 local rlc = Instance.new("UICorner"); rlc.CornerRadius = UDim.new(0, 6); rlc.Parent = reloadBtn
 
--- Botão TELEPORTAR
 local tpBtn = Instance.new("TextButton")
 tpBtn.Size = UDim2.new(0.5, -15, 0, 34)
 tpBtn.Position = UDim2.new(0.5, 5, 0, 100)
@@ -164,9 +158,7 @@ tpBtn.Text = "⚡ TELEPORTAR"
 tpBtn.Parent = panel
 local tpc = Instance.new("UICorner"); tpc.CornerRadius = UDim.new(0, 6); tpc.Parent = tpBtn
 
--- =========================================================
--- SLIDER DE VELOCIDADE (studs/s)
--- =========================================================
+-- Slider de velocidade
 local speedLabel = Instance.new("TextLabel")
 speedLabel.Size = UDim2.new(1, -20, 0, 18)
 speedLabel.Position = UDim2.new(0, 10, 0, 145)
@@ -178,7 +170,6 @@ speedLabel.TextSize = 12
 speedLabel.TextXAlignment = Enum.TextXAlignment.Left
 speedLabel.Parent = panel
 
--- Barra do slider
 local sliderBg = Instance.new("Frame")
 sliderBg.Size = UDim2.new(1, -20, 0, 8)
 sliderBg.Position = UDim2.new(0, 10, 0, 168)
@@ -211,7 +202,6 @@ sliderHit.Text = ""
 sliderHit.ZIndex = 3
 sliderHit.Parent = sliderBg
 
--- Hint embaixo do slider
 local speedHint = Instance.new("TextLabel")
 speedHint.Size = UDim2.new(1, -20, 0, 16)
 speedHint.Position = UDim2.new(0, 10, 0, 182)
@@ -224,7 +214,7 @@ speedHint.TextSize = 10
 speedHint.TextXAlignment = Enum.TextXAlignment.Center
 speedHint.Parent = panel
 
--- Botões de preset (rápido)
+-- Presets
 local presets = {
     { label = "LENTO", speed = 50 },
     { label = "NORMAL", speed = 300 },
@@ -259,7 +249,6 @@ for i, preset in ipairs(presets) do
     end)
 end
 
--- Status
 local status = Instance.new("TextLabel")
 status.Size = UDim2.new(1, -20, 0, 18)
 status.Position = UDim2.new(0, 10, 0, 232)
@@ -314,7 +303,6 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- Inicializa slider em 300 (que é 30% do range 1-1000)
 setSpeedFromRel((CONFIG.TeleportSpeed - CONFIG.MinSpeed) / (CONFIG.MaxSpeed - CONFIG.MinSpeed))
 
 -- =========================================================
@@ -617,7 +605,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE (velocidade em studs/s)
+-- TELEPORTE EM PEQUENOS PASSOS (PivotTo)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -665,41 +653,77 @@ tpBtn.MouseButton1Click:Connect(function()
     local direction = (hrp.Position - doorPos).Unit
     if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
     local finalPos = doorPos + direction * CONFIG.TeleportOffset + Vector3.new(0, 3, 0)
-    local targetCFrame = CFrame.new(finalPos, Vector3.new(doorPos.X, finalPos.Y, doorPos.Z))
+    local startPos = hrp.Position
+    local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
 
-    -- ✅ Duração = distância / velocidade
-    local distancia = (finalPos - hrp.Position).Magnitude
-    local duracao = distancia / math.max(CONFIG.TeleportSpeed, 1)
-
-    if duracao < 0.05 then
-        -- Muito rápido: teleporte instantâneo
-        hrp.CFrame = targetCFrame
-        status.Text = string.format("⚡ Teleportado (%.0f studs)", distancia)
+    local distancia = (finalPos - startPos).Magnitude
+    if distancia < 0.5 then
+        status.Text = "✅ Já está na porta"
         status.TextColor3 = Color3.fromRGB(150, 255, 150)
         task.delay(2, function() status.Text = "" end)
-    else
-        tpRunning = true
-        tpBtn.Active = false
-        tpBtn.Text = "⏳ ..."
-        status.Text = string.format("⚡ %d studs/s — %.0f studs em %.1fs",
-            CONFIG.TeleportSpeed, distancia, duracao)
-        status.TextColor3 = Color3.fromRGB(255, 200, 100)
-
-        local tween = TweenService:Create(
-            hrp,
-            TweenInfo.new(duracao, Enum.EasingStyle.Linear), -- Linear = velocidade constante
-            { CFrame = targetCFrame }
-        )
-        tween:Play()
-        tween.Completed:Connect(function()
-            status.Text = string.format("✅ Chegou (%.0f studs)", distancia)
-            status.TextColor3 = Color3.fromRGB(150, 255, 150)
-            tpBtn.Active = true
-            tpBtn.Text = "⚡ TELEPORTAR"
-            task.delay(2, function() status.Text = "" end)
-            tpRunning = false
-        end)
+        return
     end
+
+    -- ✅ Calcula passo: quantos studs por tick
+    -- A cada StepDelay segundos, move StepSize studs
+    local velocidadeEfetiva = CONFIG.StepSize / CONFIG.StepDelay -- studs/s real
+    -- Ajusta StepSize pela velocidade escolhida pelo slider
+    local stepSize = math.max(1, CONFIG.TeleportSpeed * CONFIG.StepDelay)
+    stepSize = math.min(stepSize, CONFIG.StepSize * 3) -- não deixa passo gigante
+
+    local passos = math.ceil(distancia / stepSize)
+    local tempoTotal = passos * CONFIG.StepDelay
+
+    tpRunning = true
+    tpBtn.Active = false
+    tpBtn.Text = "⏳ ..."
+    status.Text = string.format("🚶 %d passos (%.0f studs, %.1fs)",
+        passos, distancia, tempoTotal)
+    status.TextColor3 = Color3.fromRGB(255, 200, 100)
+
+    -- Loop de passos
+    task.spawn(function()
+        local atual = startPos
+        local direcao = (finalPos - startPos).Unit
+
+        for i = 1, passos do
+            if not char or not char.Parent or not hrp or not hrp.Parent then break end
+
+            -- Próxima posição
+            local proximo = atual + direcao * stepSize
+            -- Não passa do destino
+            if (proximo - startPos).Magnitude > distancia then
+                proximo = finalPos
+            end
+
+            -- ✅ PivotTo move o personagem inteiro (menos suspeito que HRP.CFrame)
+            local ok, err = pcall(function()
+                char:PivotTo(CFrame.new(proximo, lookAt))
+            end)
+
+            if not ok then
+                -- Fallback: HRP direto
+                pcall(function()
+                    hrp.CFrame = CFrame.new(proximo, lookAt)
+                end)
+            end
+
+            atual = proximo
+            task.wait(CONFIG.StepDelay)
+        end
+
+        -- Garante posição final exata
+        pcall(function()
+            char:PivotTo(CFrame.new(finalPos, lookAt))
+        end)
+
+        status.Text = string.format("✅ Chegou (%d passos)", passos)
+        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+        tpBtn.Active = true
+        tpBtn.Text = "⚡ TELEPORTAR"
+        task.delay(2, function() status.Text = "" end)
+        tpRunning = false
+    end)
 end)
 
 -- =========================================================
