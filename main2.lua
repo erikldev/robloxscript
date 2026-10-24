@@ -13,35 +13,27 @@ local camera = Workspace.CurrentCamera
 local HAS_DRAWING = (Drawing ~= nil)
 
 local CONFIG = {
-    -- Door ESP
     DoorColor     = Color3.fromRGB(255, 80, 80),
     DoorFill      = 0.95,
     DoorMaxDist   = 800,
     DoorMinDist   = 15,
     DoorName      = "HalloweenDoor",
-    -- Player ESP
     PlayerColor   = Color3.fromRGB(80, 180, 255),
     PlayerFill    = 0.7,
     PlayerMaxDist = 2000,
-    -- Geral
     ToggleKey     = Enum.KeyCode.E,
     ScanInterval  = 2,
     TeleportOffset = 5,
-    -- Velocidade
     TeleportSpeed = 300,
     MinSpeed      = 1,
     MaxSpeed      = 1000,
-    -- Teleporte em passos
     StepSize      = 4,
     StepDelay     = 0.03,
-    -- Altura do voo
     FlyHeight     = 100,
-    -- HoldDuration
     ReduceHold    = true,
     HoldValue     = 0.1,
-    -- Auto-ativar porta
     AutoFire      = true,
-    ManterPosicao = 0.5, -- segundos re-fixando posição após disparar
+    ManterPosicao = 0.5,
 }
 
 -- =========================================================
@@ -750,9 +742,8 @@ local function setDoorEnabled(state)
             d.highlight.Enabled = false
             d.nameT.setVisible(false); d.distT.setVisible(false)
         end
-    endend
-
-local function setPlayerEnabled(state)
+    end
+endlocal function setPlayerEnabled(state)
     playerEnabled = state
     playerBtn.Text = playerEnabled and "PLAYER: ON" or "PLAYER: OFF"
     TweenService:Create(playerBtn, TweenInfo.new(0.2), {
@@ -887,30 +878,25 @@ tpBtn.MouseButton1Click:Connect(function()
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
     task.spawn(function()
-        -- Voando por cima
         moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
         moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
         moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
 
-        -- Chegou
         pcall(function()
             char:PivotTo(CFrame.new(finalPos, lookAt))
         end)
 
         if CONFIG.ReduceHold then aplicarHold() end
 
-        -- ✅ AUTO-FIRE SEM SOLTAR: dispara IMEDIATAMENTE
         if CONFIG.AutoFire then
             local prompt = getPromptFromDoor(nearest.model)
             if prompt then
-                -- Garante hold
                 if CONFIG.ReduceHold then
                     pcall(function()
                         prompt.HoldDuration = CONFIG.HoldValue
                     end)
                 end
 
-                -- Dispara no mesmo frame
                 if fireproximityprompt then
                     pcall(function() fireproximityprompt(prompt) end)
                 else
@@ -920,7 +906,6 @@ tpBtn.MouseButton1Click:Connect(function()
                     end)
                 end
 
-                -- ✅ Continua re-fixando posição pra evitar rubber band
                 local manterAte = tick() + CONFIG.ManterPosicao
                 while tick() < manterAte do
                     if char and char.Parent and hrp and hrp.Parent then
