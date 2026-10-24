@@ -766,3 +766,90 @@ tpBtn.MouseButton1Click:Connect(function()
     end
 
     local nearest = getNearestDoor()
+    if not nearest then
+        status.Text = "❌ Nenhuma HalloweenDoor encontrada"
+        status.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.delay(2, function() status.Text = "" end)
+        return
+    end
+
+    local doorPos = nearest.part.Position
+    local direction = (hrp.Position - doorPos).Unit
+    if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
+    local finalPos = doorPos + direction * CONFIG.TeleportOffset + Vector3.new(0, 3, 0)
+    local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
+
+    local startPos = hrp.Position
+    local alturaVoo = startPos.Y + CONFIG.FlyHeight
+
+    local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)
+    local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)
+    local p3 = finalPos
+
+    local distanciaTotal = (p1 - startPos).Magnitude
+                         + (p2 - p1).Magnitude
+                         + (p3 - p2).Magnitude
+
+    tpRunning = true
+    tpBtn.Active = false
+    tpBtn.Text = "⏳ ..."
+    status.Text = string.format("✈️ Voando por cima (%.0f studs)...", distanciaTotal)
+    status.TextColor3 = Color3.fromRGB(255, 200, 100)
+
+    task.spawn(function()
+        moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
+        moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
+        moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
+
+        pcall(function()
+            char:PivotTo(CFrame.new(finalPos, lookAt))
+        end)
+
+        -- ✅ Reaplica hold se necessário
+        if CONFIG.ReduceHold then aplicarHold() end
+
+        status.Text = string.format("✅ Chegou (%.0f studs)", distanciaTotal)
+        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+        tpBtn.Active = true
+        tpBtn.Text = "⚡ TELEPORTAR"
+        task.delay(2.5, function() status.Text = "" end)
+        tpRunning = false
+    end)
+end)
+
+-- =========================================================
+-- FECHAR / REABRIR
+-- =========================================================
+closeBtn.MouseButton1Click:Connect(function()
+    panel.Visible = false
+    reopenBtn.Visible = true
+    reopenBtn.Position = panel.Position
+end)
+
+reopenBtn.MouseButton1Click:Connect(function()
+    panel.Visible = true
+    reopenBtn.Visible = false
+end)
+
+-- =========================================================
+-- INIT
+-- =========================================================
+refreshPlayers()
+refreshDoors()
+updateInfo()
+aplicarHold()
+
+-- Reaplica hold a cada 2s (caso o jogo resete)
+task.spawn(function()
+    while task.wait(2) do
+        if CONFIG.ReduceHold then aplicarHold() end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(CONFIG.ScanInterval) do
+        refreshPlayers()
+        refreshDoors()
+        updateInfo()
+    end
+end)
