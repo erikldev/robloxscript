@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v27 (voo por baixo + auto-hold corrigido) — VERIFICADO
+    ESP + HUD — v28 (teleporte gruda na porta até soltar)
 ]]
 
 local Players = game:GetService("Players")
@@ -33,11 +33,18 @@ local CONFIG = {
     ReduceHold    = true,
     HoldValue     = 0.1,
     AutoFire      = true,
-    ManterPosicao = 1.0,
     AutoHold      = true,
     AutoHoldRange = 15,
     NoclipEnabled = false,
 }
+
+-- =========================================================
+-- ESTADO GLOBAL DO "GRUDE"
+-- =========================================================
+local grudado = false
+local posGrude = nil
+local lookGrude = nil
+local grudeConn = nil
 
 -- =========================================================
 -- HUD BASE
@@ -63,7 +70,7 @@ reopenBtn.Parent = gui
 local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(1, 0); rbc.Parent = reopenBtn
 
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 320, 0, 680)
+panel.Size = UDim2.new(0, 320, 0, 720)
 panel.Position = UDim2.new(0, 10, 0, 80)
 panel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 panel.BackgroundTransparency = 0.1
@@ -149,17 +156,18 @@ reloadBtn.Text = "🔄 RECARREGAR"
 reloadBtn.Parent = panel
 local rlc = Instance.new("UICorner"); rlc.CornerRadius = UDim.new(0, 6); rlc.Parent = reloadBtn
 
-local tpBtn = Instance.new("TextButton")
-tpBtn.Size = UDim2.new(0.5, -15, 0, 34)
-tpBtn.Position = UDim2.new(0.5, 5, 0, 100)
-tpBtn.BackgroundColor3 = Color3.fromRGB(150, 80, 255)
-tpBtn.BorderSizePixel = 0
-tpBtn.Font = Enum.Font.GothamBold
-tpBtn.TextSize = 12
-tpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-tpBtn.Text = "⚡ TELEPORTAR"
-tpBtn.Parent = panel
-local tpc = Instance.new("UICorner"); tpc.CornerRadius = UDim.new(0, 6); tpc.Parent = tpBtn
+-- ✅ Botão GRUDAR/SOLTAR
+local grudeBtn = Instance.new("TextButton")
+grudeBtn.Size = UDim2.new(0.5, -15, 0, 34)
+grudeBtn.Position = UDim2.new(0.5, 5, 0, 100)
+grudeBtn.BackgroundColor3 = Color3.fromRGB(150, 80, 255)
+grudeBtn.BorderSizePixel = 0
+grudeBtn.Font = Enum.Font.GothamBold
+grudeBtn.TextSize = 12
+grudeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+grudeBtn.Text = "⚡ GRUDAR NA PORTA"
+grudeBtn.Parent = panel
+local gdc = Instance.new("UICorner"); gdc.CornerRadius = UDim.new(0, 6); gdc.Parent = grudeBtn
 
 local speedLabel = Instance.new("TextLabel")
 speedLabel.Size = UDim2.new(1, -20, 0, 18)
@@ -375,6 +383,57 @@ status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = panel
 
 -- =========================================================
+-- FUNÇÃO: GRUDAR / SOLTAR
+-- =========================================================
+local function soltar()
+    grudado = false
+    posGrude = nil
+    lookGrude = nil
+    if grudeConn then
+        grudeConn:Disconnect()
+        grudeConn = nil
+    end
+    grudeBtn.Text = "⚡ GRUDAR NA PORTA"
+    TweenService:Create(grudeBtn, TweenInfo.new(0.2), {
+        BackgroundColor3 = Color3.fromRGB(150, 80, 255)
+    }):Play()
+end
+
+local function grudar(char, pos, lookAt)
+    soltar()
+    grudado = true
+    posGrude = pos
+    lookGrude = lookAt
+    grudeBtn.Text = "🔓 SOLTAR DA PORTA"
+    TweenService:Create(grudeBtn, TweenInfo.new(0.2), {
+        BackgroundColor3 = Color3.fromRGB(60, 200, 100)
+    }):Play()
+
+    -- ✅ Loop que re-fixa a posição a cada frame (RunService.Heartbeat)
+    grudeConn = RunService.Heartbeat:Connect(function()
+        if not grudado then return end
+        local c = player.Character
+        if not c or not c.Parent then return end
+        pcall(function()
+            c:PivotTo(CFrame.new(posGrude, lookGrude))
+        end)
+    end)
+
+    status.Text = "🔒 Grudado na porta! (clica SOLTAR p/ liberar)"
+    status.TextColor3 = Color3.fromRGB(150, 255, 150)
+end
+
+grudeBtn.MouseButton1Click:Connect(function()
+    if grudado then
+        soltar()
+        status.Text = "🔓 Solto da porta"
+        status.TextColor3 = Color3.fromRGB(255, 180, 100)
+        task.delay(2, function() status.Text = "" end)
+    end
+    -- Se não estiver grudado, o botão só faz sentido depois do teleporte
+end)
+
+-- =========================================================
 -- NOCLIP
 -- =========================================================
 local noclipConn = nil
@@ -422,7 +481,7 @@ noclipToggle.MouseButton1Click:Connect(function()
 end)
 
 -- =========================================================
--- AUTO HOLD (usa fireproximityprompt como principal)
+-- AUTO HOLD
 -- =========================================================
 local autoHoldConn = nil
 
@@ -935,7 +994,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE + AUTO-FIRE (voo por baixo)
+-- TELEPORTE + GRUDE
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -995,7 +1054,17 @@ local function moverSuave(char, fromPos, toPos, speed, lookAt)
     end
 end
 
-tpBtn.MouseButton1Click:Connect(function()
+-- ✅ Botão GRUDAR: teleporta, chega na porta e JÁ GRUDA
+grudeBtn.MouseButton1Click:Connect(function()
+    -- Se já está grudado, solta
+    if grudado then
+        soltar()
+        status.Text = "🔓 Solto da porta"
+        status.TextColor3 = Color3.fromRGB(255, 180, 100)
+        task.delay(2, function() status.Text = "" end)
+        return
+    end
+
     if tpRunning then return end
 
     local char = player.Character
@@ -1035,22 +1104,28 @@ tpBtn.MouseButton1Click:Connect(function()
                          + (p3 - p2).Magnitude
 
     tpRunning = true
-    tpBtn.Active = false
-    tpBtn.Text = "⏳ ..."
+    grudeBtn.Active = false
+    grudeBtn.Text = "⏳ Voando..."
     status.Text = string.format("✈️ Voando por baixo (%.0f studs)...", distanciaTotal)
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
     task.spawn(function()
+        -- Voa por baixo
         moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
         moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
         moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
 
+        -- Cola na porta
         pcall(function()
             char:PivotTo(CFrame.new(finalPos, lookAt))
         end)
 
         if CONFIG.ReduceHold then aplicarHold() end
 
+        -- ✅ Ativa o modo GRUDE (re-fixa até soltar)
+        grudar(char, finalPos, lookAt)
+
+        -- Dispara o prompt
         if CONFIG.AutoFire then
             local prompt = getPromptFromDoor(nearest.model)
             if prompt then
@@ -1069,33 +1144,18 @@ tpBtn.MouseButton1Click:Connect(function()
                     end)
                 end
 
-                status.Text = "🔥 Evento enviado, segurando posição..."
-                status.TextColor3 = Color3.fromRGB(255, 200, 100)
-
-                local manterAte = tick() + CONFIG.ManterPosicao
-                while tick() < manterAte do
-                    if char and char.Parent and hrp and hrp.Parent then
-                        pcall(function()
-                            char:PivotTo(CFrame.new(finalPos, lookAt))
-                        end)
-                    end
-                    task.wait(0.03)
-                end
-
-                status.Text = "✅ Porta ativada! (pode soltar)"
+                status.Text = "🔥 Porta ativada + GRUDADO! Clica SOLTAR p/ liberar"
                 status.TextColor3 = Color3.fromRGB(150, 255, 150)
             else
                 status.Text = "⚠️ Prompt não encontrado"
                 status.TextColor3 = Color3.fromRGB(255, 180, 100)
             end
         else
-            status.Text = string.format("✅ Chegou (%.0f studs)", distanciaTotal)
+            status.Text = "🔒 Grudado (clica SOLTAR p/ liberar)"
             status.TextColor3 = Color3.fromRGB(150, 255, 150)
         end
 
-        tpBtn.Active = true
-        tpBtn.Text = "⚡ TELEPORTAR"
-        task.delay(3, function() status.Text = "" end)
+        grudeBtn.Active = true
         tpRunning = false
     end)
 end)
