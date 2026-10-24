@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v12 (teleporte em pequenos passos com PivotTo)
+    ESP + HUD — v13 (teleporte com raycast anti-sólido)
 ]]
 
 local Players = game:GetService("Players")
@@ -31,9 +31,9 @@ local CONFIG = {
     TeleportSpeed = 300,
     MinSpeed      = 1,
     MaxSpeed      = 1000,
-    -- ✅ Teleporte em passos (anti-cheat friendly)
-    StepSize      = 4,      -- studs por passo (menor = mais seguro)
-    StepDelay     = 0.03,   -- segundos entre passos (menor = mais rápido)
+    -- Teleporte em passos
+    StepSize      = 4,
+    StepDelay     = 0.03,
 }
 
 -- =========================================================
@@ -158,7 +158,6 @@ tpBtn.Text = "⚡ TELEPORTAR"
 tpBtn.Parent = panel
 local tpc = Instance.new("UICorner"); tpc.CornerRadius = UDim.new(0, 6); tpc.Parent = tpBtn
 
--- Slider de velocidade
 local speedLabel = Instance.new("TextLabel")
 speedLabel.Size = UDim2.new(1, -20, 0, 18)
 speedLabel.Position = UDim2.new(0, 10, 0, 145)
@@ -214,7 +213,6 @@ speedHint.TextSize = 10
 speedHint.TextXAlignment = Enum.TextXAlignment.Center
 speedHint.Parent = panel
 
--- Presets
 local presets = {
     { label = "LENTO", speed = 50 },
     { label = "NORMAL", speed = 300 },
@@ -261,7 +259,7 @@ status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = panel
 
 -- =========================================================
--- LÓGICA DO SLIDER
+-- SLIDER
 -- =========================================================
 local function setSpeedFromRel(rel)
     rel = math.clamp(rel, 0, 1)
@@ -605,7 +603,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE EM PEQUENOS PASSOS (PivotTo)
+-- TELEPORTE COM RAYCAST (anti-sólido)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -655,8 +653,8 @@ tpBtn.MouseButton1Click:Connect(function()
     local finalPos = doorPos + direction * CONFIG.TeleportOffset + Vector3.new(0, 3, 0)
     local startPos = hrp.Position
     local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
-
     local distancia = (finalPos - startPos).Magnitude
+
     if distancia < 0.5 then
         status.Text = "✅ Já está na porta"
         status.TextColor3 = Color3.fromRGB(150, 255, 150)
@@ -664,64 +662,90 @@ tpBtn.MouseButton1Click:Connect(function()
         return
     end
 
-    -- ✅ Calcula passo: quantos studs por tick
-    -- A cada StepDelay segundos, move StepSize studs
-    local velocidadeEfetiva = CONFIG.StepSize / CONFIG.StepDelay -- studs/s real
-    -- Ajusta StepSize pela velocidade escolhida pelo slider
-    local stepSize = math.max(1, CONFIG.TeleportSpeed * CONFIG.StepDelay)
-    stepSize = math.min(stepSize, CONFIG.StepSize * 3) -- não deixa passo gigante
+    -- Raycast params
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = {char}
 
-    local passos = math.ceil(distancia / stepSize)
-    local tempoTotal = passos * CONFIG.StepDelay
+    -- Step size baseado na velocidade
+    local stepSize = math.max(1, CONFIG.TeleportSpeed * CONFIG.StepDelay)
+    stepSize = math.min(stepSize, CONFIG.StepSize * 3)
+
+    -- Direção horizontal
+    local direcao = finalPos - startPos
+    local dirHorizontal = Vector3.new(direcao.X, 0, direcao.Z)
+    if dirHorizontal.Magnitude < 0.1 then
+        dirHorizontal = Vector3.new(0, 0, 1)
+    else
+        dirHorizontal = dirHorizontal.Unit
+    end
 
     tpRunning = true
     tpBtn.Active = false
     tpBtn.Text = "⏳ ..."
-    status.Text = string.format("🚶 %d passos (%.0f studs, %.1fs)",
-        passos, distancia, tempoTotal)
+    status.Text = string.format("🚶 Teleportando (%.0f studs)...", distancia)
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
-    -- Loop de passos
     task.spawn(function()
         local atual = startPos
-        local direcao = (finalPos - startPos).Unit
+        local passos = 0
+        local bloqueado = false
+        local maxPassos = math.ceil(distancia / 1) + 100
 
-        for i = 1, passos do
+        while passos < maxPassos do
             if not char or not char.Parent or not hrp or not hrp.Parent then break end
 
-            -- Próxima posição
-            local proximo = atual + direcao * stepSize
-            -- Não passa do destino
-            if (proximo - startPos).Magnitude > distancia then
-                proximo = finalPos
+            local restante = (finalPos - atual).Magnitude
+            if restante < stepSize then
+                -- Chegou: vai pro destino final
+                pcall(function()
+                    char:PivotTo(CFrame.new(finalPos, lookAt))
+                end)
+                break
             end
 
-            -- ✅ PivotTo move o personagem inteiro (menos suspeito que HRP.CFrame)
-            local ok, err = pcall(function()
-                char:PivotTo(CFrame.new(proximo, lookAt))
+            -- Raycast: tem sólido no caminho?
+            local origem = atual + Vector3.new(0, 2, 0)
+            local alvo = atual + dirHorizontal * stepSize + Vector3.new(0, 2, 0)
+            local result = Workspace:Raycast(origem, alvo - origem, rayParams)
+
+            if result then
+                -- Bateu → tenta desviar pra cima
+                local origemCima = atual + Vector3.new(0, 6, 0)
+                local alvoCima = alvo + Vector3.new(0, 4, 0)
+                local result2 = Workspace:Raycast(origemCima, alvoCima - origemCima, rayParams)
+
+                if result2 then
+                    -- Continua bloqueado → para
+                    bloqueado = true
+                    break
+                end
+
+                -- Passa por cima
+                atual = atual + Vector3.new(0, 5, 0) + dirHorizontal * stepSize
+            else
+                atual = atual + dirHorizontal * stepSize
+            end
+
+            pcall(function()
+                char:PivotTo(CFrame.new(atual, lookAt))
             end)
 
-            if not ok then
-                -- Fallback: HRP direto
-                pcall(function()
-                    hrp.CFrame = CFrame.new(proximo, lookAt)
-                end)
-            end
-
-            atual = proximo
+            passos = passos + 1
             task.wait(CONFIG.StepDelay)
         end
 
-        -- Garante posição final exata
-        pcall(function()
-            char:PivotTo(CFrame.new(finalPos, lookAt))
-        end)
+        if bloqueado then
+            status.Text = "⚠️ Caminho bloqueado por sólido"
+            status.TextColor3 = Color3.fromRGB(255, 180, 100)
+        else
+            status.Text = string.format("✅ Chegou (%d passos)", passos)
+            status.TextColor3 = Color3.fromRGB(150, 255, 150)
+        end
 
-        status.Text = string.format("✅ Chegou (%d passos)", passos)
-        status.TextColor3 = Color3.fromRGB(150, 255, 150)
         tpBtn.Active = true
         tpBtn.Text = "⚡ TELEPORTAR"
-        task.delay(2, function() status.Text = "" end)
+        task.delay(2.5, function() status.Text = "" end)
         tpRunning = false
     end)
 end)
