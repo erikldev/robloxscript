@@ -746,4 +746,236 @@ end
 local function setPlayerEnabled(state)
     playerEnabled = state
     playerBtn.Text = playerEnabled and "PLAYER: ON" or "PLAYER: OFF"
-    TweenService:Create(playerBtn, TweenInfo.new(0.2
+    TweenService:Create(playerBtn, TweenInfo.new(0.2), {
+        BackgroundColor3 = playerEnabled and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
+    }):Play()
+    if not playerEnabled then
+        for _, d in pairs(playerESPs) do
+            d.highlight.Enabled = false
+            d.nameT.setVisible(false); d.distT.setVisible(false)
+        end
+    end
+end
+
+reloadBtn.MouseButton1Click:Connect(function()
+    refreshDoors(); refreshPlayers(); updateInfo()
+    aplicarHold()
+    status.Text = "🔄 Recarregado"
+    status.TextColor3 = Color3.fromRGB(150, 255, 150)
+    task.delay(2, function() status.Text = "" end)
+end)
+
+doorBtn.MouseButton1Click:Connect(function() setDoorEnabled(not doorEnabled) end)
+playerBtn.MouseButton1Click:Connect(function() setPlayerEnabled(not playerEnabled) end)
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == CONFIG.ToggleKey then setDoorEnabled(not doorEnabled) end
+end)
+
+-- =========================================================
+-- TELEPORTE + AUTO-FIRE
+-- =========================================================
+local function getNearestDoor()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    local myPos = hrp.Position
+    local nearest, nearestDist = nil, math.huge
+    for model, d in pairs(doorESPs) do
+        local part = d.mainPart
+        if part and part.Parent then
+            local dist = (part.Position - myPos).Magnitude
+            if dist < nearestDist then
+                nearestDist = dist
+                nearest = {model = model, part = part, dist = dist}
+            end
+        end
+    end
+    return nearest
+end
+
+local function getPromptFromDoor(doorModel)
+    for _, d in ipairs(doorModel:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            return d
+        end
+    end
+    return nil
+end
+
+local tpRunning = false
+
+local function moverSuave(char, fromPos, toPos, speed, lookAt)
+    local distancia = (toPos - fromPos).Magnitude
+    if distancia < 0.1 then return end
+
+    local stepSize = math.max(2, speed * CONFIG.StepDelay)
+    stepSize = math.min(stepSize, CONFIG.StepSize * 3)
+
+    local passos = math.ceil(distancia / stepSize)
+    local direcao = (toPos - fromPos).Unit
+    local atual = fromPos
+
+    for i = 1, passos do
+        if not char or not char.Parent then break end
+        if (toPos - atual).Magnitude < stepSize then
+            pcall(function()
+                char:PivotTo(CFrame.new(toPos, lookAt or (toPos + direcao)))
+            end)
+            return
+        end
+        atual = atual + direcao * stepSize
+        pcall(function()
+            char:PivotTo(CFrame.new(atual, lookAt or (atual + direcao)))
+        end)
+        task.wait(CONFIG.StepDelay)
+    end
+end
+
+tpBtn.MouseButton1Click:Connect(function()
+    if tpRunning then return end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        status.Text = "❌ Sem personagem"
+        status.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.delay(2, function() status.Text = "" end)
+        return
+    end
+
+    local nearest = getNearestDoor()
+    if not nearest then
+        status.Text = "❌ Nenhuma HalloweenDoor encontrada"
+        status.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.delay(2, function() status.Text = "" end)
+        return
+    end
+
+    local doorPos = nearest.part.Position
+    local direction = (hrp.Position - doorPos).Unit
+    if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
+
+    -- ✅ Destino final = chão da porta (sem +3)
+    local finalPos = doorPos + direction * CONFIG.TeleportOffset
+    finalPos = Vector3.new(finalPos.X, doorPos.Y, finalPos.Z)
+    local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
+
+    local startPos = hrp.Position
+    -- ✅ Sobe 100 a partir do chão da porta
+    local alturaVoo = doorPos.Y + CONFIG.FlyHeight
+
+    local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)
+    local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)
+    local p3 = finalPos
+
+    local distanciaTotal = (p1 - startPos).Magnitude
+                         + (p2 - p1).Magnitude
+                         + (p3 - p2).Magnitude
+
+    tpRunning = true
+    tpBtn.Active = false
+    tpBtn.Text = "⏳ ..."
+    status.Text = string.format("✈️ Voando (%.0f studs)...", distanciaTotal)
+    status.TextColor3 = Color3.fromRGB(255, 200, 100)
+
+    task.spawn(function()
+        -- 1. Sobe
+        moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
+        -- 2. Vai por cima
+        moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
+        -- 3. Desce até o chão da porta
+        moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
+
+        -- 4. Cola no chão
+        pcall(function()
+            char:PivotTo(CFrame.new(finalPos, lookAt))
+        end)
+
+        if CONFIG.ReduceHold then aplicarHold() end
+
+        -- 5. Dispara grudado
+        if CONFIG.AutoFire then
+            local prompt = getPromptFromDoor(nearest.model)
+            if prompt then
+                if CONFIG.ReduceHold then
+                    pcall(function()
+                        prompt.HoldDuration = CONFIG.HoldValue
+                    end)
+                end
+
+                if fireproximityprompt then
+                    pcall(function() fireproximityprompt(prompt) end)
+                else
+                    pcall(function()
+                        prompt:InputHoldBegin()
+                        prompt:InputHoldEnd()
+                    end)
+                end
+
+                status.Text = "🔥 Evento enviado, segurando posição..."
+                status.TextColor3 = Color3.fromRGB(255, 200, 100)
+
+                -- 6. Re-fixa no chão durante processamento
+                local manterAte = tick() + CONFIG.ManterPosicao
+                while tick() < manterAte do
+                    if char and char.Parent and hrp and hrp.Parent then
+                        pcall(function()
+                            char:PivotTo(CFrame.new(finalPos, lookAt))
+                        end)
+                    end
+                    task.wait(0.03)
+                end
+
+                status.Text = "✅ Porta ativada! (pode soltar)"
+                status.TextColor3 = Color3.fromRGB(150, 255, 150)
+            else
+                status.Text = "⚠️ Prompt não encontrado"
+                status.TextColor3 = Color3.fromRGB(255, 180, 100)
+            end
+        else
+            status.Text = string.format("✅ Chegou (%.0f studs)", distanciaTotal)
+            status.TextColor3 = Color3.fromRGB(150, 255, 150)
+        end
+
+        tpBtn.Active = true
+        tpBtn.Text = "⚡ TELEPORTAR"
+        task.delay(3, function() status.Text = "" end)
+        tpRunning = false
+    end)
+end)
+
+-- =========================================================
+-- FECHAR / REABRIR
+-- =========================================================
+closeBtn.MouseButton1Click:Connect(function()
+    panel.Visible = false
+    reopenBtn.Visible = true
+    reopenBtn.Position = panel.Position
+end)
+
+reopenBtn.MouseButton1Click:Connect(function()
+    panel.Visible = true
+    reopenBtn.Visible = false
+end)
+
+-- =========================================================
+-- INIT
+-- =========================================================
+refreshPlayers()
+refreshDoors()
+updateInfo()
+aplicarHold()
+
+task.spawn(function()
+    while task.wait(CONFIG.ScanInterval) do
+        refreshPlayers()
+        refreshDoors()
+        updateInfo()
+        if CONFIG.ReduceHold then
+            aplicarHold()
+        end
+    end
+end)
