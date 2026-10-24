@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v6 (teleporte suave + arrastar + fechar, sem logs)
+    ESP + HUD — v7 (fix tela vermelha + teleporte MoveTo + menu reposicionável)
 ]]
 
 local Players = game:GetService("Players")
@@ -14,14 +14,16 @@ local HAS_DRAWING = (Drawing ~= nil)
 
 local CONFIG = {
     DoorColor     = Color3.fromRGB(255, 80, 80),
-    DoorFill      = 0.85,
-    DoorMaxDist   = 2000,
+    DoorFill      = 0.95,   -- ⬆ mais transparente (era 0.85)
+    DoorMaxDist   = 800,    -- ⬇ menos distância (era 2000)
+    DoorMinDist   = 15,     -- ⬆ não liga Highlight se estiver a menos de 15 studs
     PlayerColor   = Color3.fromRGB(80, 180, 255),
     PlayerFill    = 0.7,
     PlayerMaxDist = 2000,
     ToggleKey     = Enum.KeyCode.E,
     ScanInterval  = 2,
     TeleportOffset = 5,
+    TeleportTimeout = 15,
 }
 
 -- =========================================================
@@ -37,7 +39,7 @@ gui.Parent = player:WaitForChild("PlayerGui")
 -- Botão flutuante pra reabrir
 local reopenBtn = Instance.new("TextButton")
 reopenBtn.Size = UDim2.new(0, 50, 0, 50)
-reopenBtn.Position = UDim2.new(0, 10, 0, 10)
+reopenBtn.Position = UDim2.new(0, 10, 0, 80)
 reopenBtn.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
 reopenBtn.BorderSizePixel = 0
 reopenBtn.Font = Enum.Font.GothamBold
@@ -51,7 +53,7 @@ local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(1, 0); rbc.Par
 -- Painel
 local panel = Instance.new("Frame")
 panel.Size = UDim2.new(0, 320, 0, 340)
-panel.Position = UDim2.new(0, 10, 0, 10)
+panel.Position = UDim2.new(0, 10, 0, 80)  -- ⬆ começa mais embaixo (era 10)
 panel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 panel.BackgroundTransparency = 0.1
 panel.BorderSizePixel = 0
@@ -155,7 +157,7 @@ tpBtn.Text = "⚡ TELEPORTAR"
 tpBtn.Parent = panel
 local tpc = Instance.new("UICorner"); tpc.CornerRadius = UDim.new(0, 6); tpc.Parent = tpBtn
 
--- Status (feedback do teleporte)
+-- Status
 local status = Instance.new("TextLabel")
 status.Size = UDim2.new(1, -20, 0, 18)
 status.Position = UDim2.new(0, 10, 0, 142)
@@ -168,7 +170,7 @@ status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = panel
 
 -- =========================================================
--- DRAG DO PAINEL
+-- DRAG DO PAINEL (com limite de tela)
 -- =========================================================
 local dragging, dragStart, startPos = false, nil, nil
 
@@ -185,10 +187,17 @@ UserInputService.InputChanged:Connect(function(input)
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
         or input.UserInputType == Enum.UserInputType.Touch) then
         local delta = input.Position - dragStart
-        panel.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-        )
+        local newX = startPos.X.Offset + delta.X
+        local newY = startPos.Y.Offset + delta.Y
+
+        -- ✅ Limita pra não sair da tela
+        local vp = camera.ViewportSize
+        local panelW = panel.AbsoluteSize.X
+        local panelH = panel.AbsoluteSize.Y
+        newX = math.clamp(newX, -panelW + 40, vp.X - 40)
+        newY = math.clamp(newY, 0, vp.Y - 40)
+
+        panel.Position = UDim2.new(0, newX, 0, newY)
     end
 end)
 
@@ -200,7 +209,7 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 -- =========================================================
--- TEXTO (Drawing / BillboardGui)
+-- TEXTO
 -- =========================================================
 local function makeText(text, color, size)
     if HAS_DRAWING then
@@ -391,13 +400,17 @@ RunService.RenderStepped:Connect(function()
     end
 
     if doorEnabled then
+        local myPos = camera.CFrame.Position
         for model, d in pairs(doorESPs) do
             local part = d.mainPart
             if part and part.Parent then
                 d.highlight.Adornee = model
                 local pos, onScreen = camera:WorldToViewportPoint(part.Position)
-                local dist = (camera.CFrame.Position - part.Position).Magnitude
-                local vis = onScreen and dist <= CONFIG.DoorMaxDist
+                local dist = (myPos - part.Position).Magnitude
+                -- ✅ Só liga se estiver ENTRE min e max (evita tela vermelha)
+                local vis = onScreen
+                    and dist <= CONFIG.DoorMaxDist
+                    and dist >= CONFIG.DoorMinDist
                 d.highlight.Enabled = vis
                 d.nameT.setVisible(vis); d.distT.setVisible(vis)
                 if vis then
@@ -464,7 +477,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE SUAVE (tween)
+-- TELEPORTE SUAVE (Humanoid:MoveTo — player ANDA até a porta)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -486,13 +499,20 @@ local function getNearestDoor()
     return nearest
 end
 
+local tpRunning = false
+
 tpBtn.MouseButton1Click:Connect(function()
+    if tpRunning then return end
+    tpRunning = true
+
     local char = player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then
         status.Text = "❌ Sem personagem"
         status.TextColor3 = Color3.fromRGB(255, 100, 100)
         task.delay(2, function() status.Text = "" end)
+        tpRunning = false
         return
     end
 
@@ -501,48 +521,63 @@ tpBtn.MouseButton1Click:Connect(function()
         status.Text = "❌ Nenhuma porta encontrada"
         status.TextColor3 = Color3.fromRGB(255, 100, 100)
         task.delay(2, function() status.Text = "" end)
+        tpRunning = false
         return
     end
 
-    local targetPos = nearest.part.Position + Vector3.new(0, 3, 0)
-    local direction = (hrp.Position - targetPos).Unit
+    -- CFrame alvo: 5 studs na frente da porta, olhando pra ela
+    local doorPos = nearest.part.Position
+    local direction = (hrp.Position - doorPos).Unit
     if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
-    local finalPos = targetPos + direction * CONFIG.TeleportOffset
+    local finalPos = doorPos + direction * CONFIG.TeleportOffset
 
-    -- Duração baseada na distância (min 0.4s, max 2s)
-    local distancia = (finalPos - hrp.Position).Magnitude
-    local duracao = math.clamp(distancia / 100, 0.4, 2)
-
-    status.Text = string.format("⚡ Teleportando... (%.0f studs)", distancia)
+    status.Text = string.format("🚶 Andando... (%.0f studs)", nearest.dist)
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
     tpBtn.Active = false
     tpBtn.Text = "⏳ ..."
 
-    -- CFrame alvo mantendo a orientação atual
-    local targetCFrame = CFrame.new(finalPos) * (hrp.CFrame - hrp.CFrame.Position)
+    -- ✅ MoveTo: o player ANDA de verdade (suave, natural, anti-cheat friendly)
+    hum:MoveTo(finalPos)
+    local inicio = tick()
+    local timeout = CONFIG.TeleportTimeout
 
-    -- Cria o tween
-    local tween = TweenService:Create(
-        hrp,
-        TweenInfo.new(duracao, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-        { CFrame = targetCFrame }
-    )
-
-    tween:Play()
-    tween.Completed:Connect(function()
-        -- Olha pra porta ao chegar
-        if hrp.Parent and nearest.part.Parent then
-            hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(
-                nearest.part.Position.X,
-                hrp.Position.Y,
-                nearest.part.Position.Z
-            ))
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        if not hum or not hum.Parent then
+            conn:Disconnect(); tpRunning = false
+            tpBtn.Active = true; tpBtn.Text = "⚡ TELEPORTAR"
+            return
         end
-        status.Text = string.format("✅ Chegou! (%.0f studs)", distancia)
-        status.TextColor3 = Color3.fromRGB(150, 255, 150)
-        tpBtn.Active = true
-        tpBtn.Text = "⚡ TELEPORTAR"
-        task.delay(2, function() status.Text = "" end)
+
+        local distAtual = (hrp.Position - finalPos).Magnitude
+
+        -- Chegou?
+        if distAtual < 3 then
+            conn:Disconnect()
+            hum:MoveTo(hrp.Position) -- para
+            -- Olha pra porta
+            local lookAt = Vector3.new(doorPos.X, hrp.Position.Y, doorPos.Z)
+            hrp.CFrame = CFrame.new(hrp.Position, lookAt)
+            status.Text = string.format("✅ Chegou! (%.0f studs)", nearest.dist)
+            status.TextColor3 = Color3.fromRGB(150, 255, 150)
+            tpBtn.Active = true
+            tpBtn.Text = "⚡ TELEPORTAR"
+            task.delay(2, function() status.Text = "" end)
+            tpRunning = false
+            return
+        end
+
+        -- Timeout
+        if tick() - inicio > timeout then
+            conn:Disconnect()
+            hum:MoveTo(hrp.Position)
+            status.Text = "⚠️ Timeout — provavelmente tem parede"
+            status.TextColor3 = Color3.fromRGB(255, 180, 100)
+            tpBtn.Active = true
+            tpBtn.Text = "⚡ TELEPORTAR"
+            task.delay(3, function() status.Text = "" end)
+            tpRunning = false
+        end
     end)
 end)
 
@@ -552,6 +587,8 @@ end)
 closeBtn.MouseButton1Click:Connect(function()
     panel.Visible = false
     reopenBtn.Visible = true
+    -- ✅ Sincroniza posição do botão de reabrir com a do painel
+    reopenBtn.Position = panel.Position
 end)
 
 reopenBtn.MouseButton1Click:Connect(function()
