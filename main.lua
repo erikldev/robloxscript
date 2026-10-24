@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v21 (teleporta + ativa + mantém posição por 1s)
+    ESP + HUD — v22 (dispara evento grudado, mantém posição, solta depois)
 ]]
 
 local Players = game:GetService("Players")
@@ -33,7 +33,7 @@ local CONFIG = {
     ReduceHold    = true,
     HoldValue     = 0.1,
     AutoFire      = true,
-    ManterPosicao = 300.0, -- ✅ 1 segundo re-fixando posição
+    ManterPosicao = 1.0,
 }
 
 -- =========================================================
@@ -774,7 +774,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE + AUTO-FIRE (mantém posição por 1s)
+-- TELEPORTE + AUTO-FIRE (dispara grudado, mantém, solta)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -878,19 +878,19 @@ tpBtn.MouseButton1Click:Connect(function()
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
     task.spawn(function()
-        -- Voando por cima
+        -- 1. Voa até a porta
         moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
         moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
         moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
 
-        -- Chegou
+        -- 2. Cola na porta
         pcall(function()
             char:PivotTo(CFrame.new(finalPos, lookAt))
         end)
 
         if CONFIG.ReduceHold then aplicarHold() end
 
-        -- ✅ AUTO-FIRE: dispara e mantém posição por 1s
+        -- 3. ✅ DISPARA PRIMEIRO (ainda grudado)
         if CONFIG.AutoFire then
             local prompt = getPromptFromDoor(nearest.model)
             if prompt then
@@ -900,7 +900,7 @@ tpBtn.MouseButton1Click:Connect(function()
                     end)
                 end
 
-                -- Dispara
+                -- Dispara AQUI, antes de qualquer pausa
                 if fireproximityprompt then
                     pcall(function() fireproximityprompt(prompt) end)
                 else
@@ -910,7 +910,10 @@ tpBtn.MouseButton1Click:Connect(function()
                     end)
                 end
 
-                -- ✅ Continua re-fixando posição por ManterPosicao segundos
+                status.Text = "🔥 Evento enviado, segurando posição..."
+                status.TextColor3 = Color3.fromRGB(255, 200, 100)
+
+                -- 4. ✅ SÓ DEPOIS continua grudado por 1s
                 local manterAte = tick() + CONFIG.ManterPosicao
                 while tick() < manterAte do
                     if char and char.Parent and hrp and hrp.Parent then
@@ -921,7 +924,8 @@ tpBtn.MouseButton1Click:Connect(function()
                     task.wait(0.03)
                 end
 
-                status.Text = "🔥 Porta ativada!"
+                -- 5. Agora sim solta
+                status.Text = "✅ Porta ativada! (pode soltar)"
                 status.TextColor3 = Color3.fromRGB(150, 255, 150)
             else
                 status.Text = "⚠️ Prompt não encontrado"
