@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v7 (fix tela vermelha + teleporte MoveTo + menu reposicionável)
+    ESP + HUD — v10 (com slider de velocidade do teleporte)
 ]]
 
 local Players = game:GetService("Players")
@@ -14,16 +14,14 @@ local HAS_DRAWING = (Drawing ~= nil)
 
 local CONFIG = {
     DoorColor     = Color3.fromRGB(255, 80, 80),
-    DoorFill      = 0.95,   -- ⬆ mais transparente (era 0.85)
-    DoorMaxDist   = 800,    -- ⬇ menos distância (era 2000)
-    DoorMinDist   = 15,     -- ⬆ não liga Highlight se estiver a menos de 15 studs
-    PlayerColor   = Color3.fromRGB(80, 180, 255),
-    PlayerFill    = 0.7,
-    PlayerMaxDist = 2000,
+    DoorFill      = 0.95,
+    DoorMaxDist   = 800,
+    DoorMinDist   = 15,
     ToggleKey     = Enum.KeyCode.E,
     ScanInterval  = 2,
     TeleportOffset = 5,
-    TeleportTimeout = 15,
+    DoorName      = "HalloweenDoor",
+    TeleportSpeed = 0.5, -- 0.0 = instantâneo, 1.0 = 2 segundos
 }
 
 -- =========================================================
@@ -52,8 +50,8 @@ local rbc = Instance.new("UICorner"); rbc.CornerRadius = UDim.new(1, 0); rbc.Par
 
 -- Painel
 local panel = Instance.new("Frame")
-panel.Size = UDim2.new(0, 320, 0, 340)
-panel.Position = UDim2.new(0, 10, 0, 80)  -- ⬆ começa mais embaixo (era 10)
+panel.Size = UDim2.new(0, 320, 0, 420)
+panel.Position = UDim2.new(0, 10, 0, 80)
 panel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 panel.BackgroundTransparency = 0.1
 panel.BorderSizePixel = 0
@@ -99,37 +97,25 @@ local info = Instance.new("TextLabel")
 info.Size = UDim2.new(1, -20, 0, 18)
 info.Position = UDim2.new(0, 10, 0, 38)
 info.BackgroundTransparency = 1
-info.Text = "Doors: 0 | Players: 0"
+info.Text = "Doors: 0"
 info.TextColor3 = Color3.fromRGB(200, 200, 210)
 info.Font = Enum.Font.Gotham
 info.TextSize = 12
 info.TextXAlignment = Enum.TextXAlignment.Left
 info.Parent = panel
 
--- Toggles
+-- Toggle DOOR
 local doorBtn = Instance.new("TextButton")
-doorBtn.Size = UDim2.new(0.5, -15, 0, 30)
+doorBtn.Size = UDim2.new(1, -20, 0, 30)
 doorBtn.Position = UDim2.new(0, 10, 0, 62)
 doorBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
 doorBtn.BorderSizePixel = 0
 doorBtn.Font = Enum.Font.GothamBold
 doorBtn.TextSize = 12
 doorBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-doorBtn.Text = "DOOR: ON"
+doorBtn.Text = "DOOR ESP: ON"
 doorBtn.Parent = panel
 local dc = Instance.new("UICorner"); dc.CornerRadius = UDim.new(0, 6); dc.Parent = doorBtn
-
-local playerBtn = Instance.new("TextButton")
-playerBtn.Size = UDim2.new(0.5, -15, 0, 30)
-playerBtn.Position = UDim2.new(0.5, 5, 0, 62)
-playerBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 100)
-playerBtn.BorderSizePixel = 0
-playerBtn.Font = Enum.Font.GothamBold
-playerBtn.TextSize = 12
-playerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-playerBtn.Text = "PLAYER: ON"
-playerBtn.Parent = panel
-local plc = Instance.new("UICorner"); plc.CornerRadius = UDim.new(0, 6); plc.Parent = playerBtn
 
 -- Botão RECARREGAR
 local reloadBtn = Instance.new("TextButton")
@@ -157,10 +143,72 @@ tpBtn.Text = "⚡ TELEPORTAR"
 tpBtn.Parent = panel
 local tpc = Instance.new("UICorner"); tpc.CornerRadius = UDim.new(0, 6); tpc.Parent = tpBtn
 
+-- =========================================================
+-- SLIDER DE VELOCIDADE
+-- =========================================================
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Size = UDim2.new(1, -20, 0, 18)
+speedLabel.Position = UDim2.new(0, 10, 0, 145)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text = "VELOCIDADE: 0.50s"
+speedLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+speedLabel.Font = Enum.Font.GothamBold
+speedLabel.TextSize = 12
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedLabel.Parent = panel
+
+-- Barra do slider (fundo)
+local sliderBg = Instance.new("Frame")
+sliderBg.Size = UDim2.new(1, -20, 0, 8)
+sliderBg.Position = UDim2.new(0, 10, 0, 168)
+sliderBg.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+sliderBg.BorderSizePixel = 0
+sliderBg.Parent = panel
+local sbgC = Instance.new("UICorner"); sbgC.CornerRadius = UDim.new(1, 0); sbgC.Parent = sliderBg
+
+-- Preenchimento (parte colorida)
+local sliderFill = Instance.new("Frame")
+sliderFill.Size = UDim2.new(0.5, 0, 1, 0) -- 0.5 = 50% (metade)
+sliderFill.BackgroundColor3 = Color3.fromRGB(150, 80, 255)
+sliderFill.BorderSizePixel = 0
+sliderFill.Parent = sliderBg
+local sfc = Instance.new("UICorner"); sfc.CornerRadius = UDim.new(1, 0); sfc.Parent = sliderFill
+
+-- Bolinha (indicador)
+local sliderKnob = Instance.new("Frame")
+sliderKnob.Size = UDim2.new(0, 18, 0, 18)
+sliderKnob.Position = UDim2.new(0.5, -9, 0.5, -9)
+sliderKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+sliderKnob.BorderSizePixel = 0
+sliderKnob.ZIndex = 2
+sliderKnob.Parent = sliderBg
+local skc = Instance.new("UICorner"); skc.CornerRadius = UDim.new(1, 0); skc.Parent = sliderKnob
+
+-- Botão invisível que cobre a barra pra capturar clique/arrastar
+local sliderHit = Instance.new("TextButton")
+sliderHit.Size = UDim2.new(1, 0, 0, 24)
+sliderHit.Position = UDim2.new(0, 0, 0.5, -12)
+sliderHit.BackgroundTransparency = 1
+sliderHit.Text = ""
+sliderHit.ZIndex = 3
+sliderHit.Parent = sliderBg
+
+-- Explicação
+local speedHint = Instance.new("TextLabel")
+speedHint.Size = UDim2.new(1, -20, 0, 16)
+speedHint.Position = UDim2.new(0, 10, 0, 182)
+speedHint.BackgroundTransparency = 1
+speedHint.Text = "← brusco   |   suave →"
+speedHint.TextColor3 = Color3.fromRGB(150, 150, 170)
+speedHint.Font = Enum.Font.Gotham
+speedHint.TextSize = 10
+speedHint.TextXAlignment = Enum.TextXAlignment.Center
+speedHint.Parent = panel
+
 -- Status
 local status = Instance.new("TextLabel")
 status.Size = UDim2.new(1, -20, 0, 18)
-status.Position = UDim2.new(0, 10, 0, 142)
+status.Position = UDim2.new(0, 10, 0, 202)
 status.BackgroundTransparency = 1
 status.Text = ""
 status.TextColor3 = Color3.fromRGB(150, 255, 150)
@@ -170,7 +218,66 @@ status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = panel
 
 -- =========================================================
--- DRAG DO PAINEL (com limite de tela)
+-- LÓGICA DO SLIDER
+-- =========================================================
+local function setSpeed(value)
+    -- value: 0 = instantâneo, 1 = 2 segundos (clamp)
+    value = math.clamp(value, 0, 1)
+    CONFIG.TeleportSpeed = value
+
+    -- Duração real: 0 → 0s (brusco), 1 → 2s (suave)
+    local duracao = value * 2
+
+    -- Atualiza UI
+    sliderFill.Size = UDim2.new(value, 0, 1, 0)
+    sliderKnob.Position = UDim2.new(value, -9, 0.5, -9)
+
+    if duracao < 0.05 then
+        speedLabel.Text = "VELOCIDADE: INSTANTÂNEO ⚡"
+        speedLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
+    else
+        speedLabel.Text = string.format("VELOCIDADE: %.2fs", duracao)
+        speedLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+    end
+end
+
+local function updateFromX(mouseX)
+    local barAbsX = sliderBg.AbsolutePosition.X
+    local barW = sliderBg.AbsoluteSize.X
+    if barW <= 0 then return end
+    local rel = (mouseX - barAbsX) / barW
+    setSpeed(rel)
+end
+
+local draggingSlider = false
+
+sliderHit.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        draggingSlider = true
+        updateFromX(input.Position.X)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+        updateFromX(input.Position.X)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        draggingSlider = false
+    end
+end)
+
+-- Inicializa em 0.5
+setSpeed(CONFIG.TeleportSpeed)
+
+-- =========================================================
+-- DRAG DO PAINEL
 -- =========================================================
 local dragging, dragStart, startPos = false, nil, nil
 
@@ -189,14 +296,10 @@ UserInputService.InputChanged:Connect(function(input)
         local delta = input.Position - dragStart
         local newX = startPos.X.Offset + delta.X
         local newY = startPos.Y.Offset + delta.Y
-
-        -- ✅ Limita pra não sair da tela
         local vp = camera.ViewportSize
         local panelW = panel.AbsoluteSize.X
-        local panelH = panel.AbsoluteSize.Y
         newX = math.clamp(newX, -panelW + 40, vp.X - 40)
         newY = math.clamp(newY, 0, vp.Y - 40)
-
         panel.Position = UDim2.new(0, newX, 0, newY)
     end
 end)
@@ -247,57 +350,11 @@ local function makeText(text, color, size)
 end
 
 -- =========================================================
--- PLAYER ESP
--- =========================================================
-local playerESPs = {}
-local playerEnabled = true
-
-local function createPlayerESP(target)
-    local hl = Instance.new("Highlight")
-    hl.FillColor = CONFIG.PlayerColor
-    hl.OutlineColor = CONFIG.PlayerColor
-    hl.FillTransparency = CONFIG.PlayerFill
-    hl.OutlineTransparency = 0
-    hl.Adornee = target.Character
-    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.Parent = gui
-    local nameT = makeText(target.Name, CONFIG.PlayerColor, 14)
-    local distT = makeText("", Color3.fromRGB(180, 220, 255), 12)
-    return { highlight = hl, nameT = nameT, distT = distT, target = target }
-end
-
-local function destroyPlayerESP(d)
-    if d.highlight then d.highlight:Destroy() end
-    if d.nameT then d.nameT.remove() end
-    if d.distT then d.distT.remove() end
-end
-
-local function refreshPlayers()
-    for pl, d in pairs(playerESPs) do
-        if not pl.Parent or not pl.Character then
-            destroyPlayerESP(d); playerESPs[pl] = nil
-        else
-            d.highlight.Adornee = pl.Character
-        end
-    end
-    for _, pl in ipairs(Players:GetPlayers()) do
-        if pl ~= player and pl.Character and not playerESPs[pl] then
-            playerESPs[pl] = createPlayerESP(pl)
-        end
-    end
-end
-
--- =========================================================
 -- DOOR ESP
 -- =========================================================
 local doorESPs = {}
 local doorEnabled = true
 local doorCount = 0
-
-local function isHallowenName(name)
-    local n = name:lower()
-    return n:find("hallowen") ~= nil or n:find("halloween") ~= nil
-end
 
 local function findFirstPart(obj)
     if obj:IsA("BasePart") then return obj end
@@ -339,7 +396,7 @@ local function scanDoors()
         if depth > 8 or visited[obj] then return end
         visited[obj] = true
         for _, k in ipairs(obj:GetChildren()) do
-            if isHallowenName(k.Name) then
+            if k.Name == CONFIG.DoorName then
                 local part = findFirstPart(k)
                 if part then
                     table.insert(found, {model = k, part = part})
@@ -376,29 +433,6 @@ end
 -- LOOP
 -- =========================================================
 RunService.RenderStepped:Connect(function()
-    if playerEnabled then
-        for pl, d in pairs(playerESPs) do
-            local char = pl.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                d.highlight.Adornee = char
-                d.highlight.Enabled = true
-                local pos, onScreen = camera:WorldToViewportPoint(hrp.Position)
-                local dist = (camera.CFrame.Position - hrp.Position).Magnitude
-                local vis = onScreen and dist <= CONFIG.PlayerMaxDist
-                d.nameT.setVisible(vis); d.distT.setVisible(vis)
-                if vis then
-                    d.nameT.setPosition(Vector2.new(pos.X, pos.Y - 30))
-                    d.distT.setText(string.format("[%d]", math.floor(dist)))
-                    d.distT.setPosition(Vector2.new(pos.X, pos.Y + 4))
-                end
-            else
-                d.highlight.Enabled = false
-                d.nameT.setVisible(false); d.distT.setVisible(false)
-            end
-        end
-    end
-
     if doorEnabled then
         local myPos = camera.CFrame.Position
         for model, d in pairs(doorESPs) do
@@ -407,7 +441,6 @@ RunService.RenderStepped:Connect(function()
                 d.highlight.Adornee = model
                 local pos, onScreen = camera:WorldToViewportPoint(part.Position)
                 local dist = (myPos - part.Position).Magnitude
-                -- ✅ Só liga se estiver ENTRE min e max (evita tela vermelha)
                 local vis = onScreen
                     and dist <= CONFIG.DoorMaxDist
                     and dist >= CONFIG.DoorMinDist
@@ -426,16 +459,15 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- =========================================================
--- TOGGLES
+-- TOGGLE
 -- =========================================================
 local function updateInfo()
-    info.Text = string.format("Doors: %d | Players: %d",
-        doorCount, math.max(0, #Players:GetPlayers() - 1))
+    info.Text = string.format("Doors: %d", doorCount)
 end
 
 local function setDoorEnabled(state)
     doorEnabled = state
-    doorBtn.Text = doorEnabled and "DOOR: ON" or "DOOR: OFF"
+    doorBtn.Text = doorEnabled and "DOOR ESP: ON" or "DOOR ESP: OFF"
     TweenService:Create(doorBtn, TweenInfo.new(0.2), {
         BackgroundColor3 = doorEnabled and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
     }):Play()
@@ -447,29 +479,14 @@ local function setDoorEnabled(state)
     end
 end
 
-local function setPlayerEnabled(state)
-    playerEnabled = state
-    playerBtn.Text = playerEnabled and "PLAYER: ON" or "PLAYER: OFF"
-    TweenService:Create(playerBtn, TweenInfo.new(0.2), {
-        BackgroundColor3 = playerEnabled and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
-    }):Play()
-    if not playerEnabled then
-        for _, d in pairs(playerESPs) do
-            d.highlight.Enabled = false
-            d.nameT.setVisible(false); d.distT.setVisible(false)
-        end
-    end
-end
-
 reloadBtn.MouseButton1Click:Connect(function()
-    refreshDoors(); refreshPlayers(); updateInfo()
+    refreshDoors(); updateInfo()
     status.Text = "🔄 Recarregado"
     status.TextColor3 = Color3.fromRGB(150, 255, 150)
     task.delay(2, function() status.Text = "" end)
 end)
 
 doorBtn.MouseButton1Click:Connect(function() setDoorEnabled(not doorEnabled) end)
-playerBtn.MouseButton1Click:Connect(function() setPlayerEnabled(not playerEnabled) end)
 
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end
@@ -477,7 +494,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE SUAVE (Humanoid:MoveTo — player ANDA até a porta)
+-- TELEPORTE (com velocidade ajustável)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -503,82 +520,61 @@ local tpRunning = false
 
 tpBtn.MouseButton1Click:Connect(function()
     if tpRunning then return end
-    tpRunning = true
 
     local char = player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum then
+    if not hrp then
         status.Text = "❌ Sem personagem"
         status.TextColor3 = Color3.fromRGB(255, 100, 100)
         task.delay(2, function() status.Text = "" end)
-        tpRunning = false
         return
     end
 
     local nearest = getNearestDoor()
     if not nearest then
-        status.Text = "❌ Nenhuma porta encontrada"
+        status.Text = "❌ Nenhuma HalloweenDoor encontrada"
         status.TextColor3 = Color3.fromRGB(255, 100, 100)
         task.delay(2, function() status.Text = "" end)
-        tpRunning = false
         return
     end
 
-    -- CFrame alvo: 5 studs na frente da porta, olhando pra ela
     local doorPos = nearest.part.Position
     local direction = (hrp.Position - doorPos).Unit
     if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
-    local finalPos = doorPos + direction * CONFIG.TeleportOffset
+    local finalPos = doorPos + direction * CONFIG.TeleportOffset + Vector3.new(0, 3, 0)
+    local targetCFrame = CFrame.new(finalPos, Vector3.new(doorPos.X, finalPos.Y, doorPos.Z))
 
-    status.Text = string.format("🚶 Andando... (%.0f studs)", nearest.dist)
-    status.TextColor3 = Color3.fromRGB(255, 200, 100)
-    tpBtn.Active = false
-    tpBtn.Text = "⏳ ..."
+    local duracao = CONFIG.TeleportSpeed * 2
 
-    -- ✅ MoveTo: o player ANDA de verdade (suave, natural, anti-cheat friendly)
-    hum:MoveTo(finalPos)
-    local inicio = tick()
-    local timeout = CONFIG.TeleportTimeout
+    if duracao < 0.05 then
+        -- Instantâneo
+        hrp.CFrame = targetCFrame
+        status.Text = string.format("⚡ Teleportado (%.0f studs)", nearest.dist)
+        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+        task.delay(2, function() status.Text = "" end)
+    else
+        -- Suave (tween)
+        tpRunning = true
+        tpBtn.Active = false
+        tpBtn.Text = "⏳ ..."
+        status.Text = string.format("⚡ Teleportando (%.1fs)...", duracao)
+        status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
-    local conn
-    conn = RunService.Heartbeat:Connect(function()
-        if not hum or not hum.Parent then
-            conn:Disconnect(); tpRunning = false
-            tpBtn.Active = true; tpBtn.Text = "⚡ TELEPORTAR"
-            return
-        end
-
-        local distAtual = (hrp.Position - finalPos).Magnitude
-
-        -- Chegou?
-        if distAtual < 3 then
-            conn:Disconnect()
-            hum:MoveTo(hrp.Position) -- para
-            -- Olha pra porta
-            local lookAt = Vector3.new(doorPos.X, hrp.Position.Y, doorPos.Z)
-            hrp.CFrame = CFrame.new(hrp.Position, lookAt)
-            status.Text = string.format("✅ Chegou! (%.0f studs)", nearest.dist)
+        local tween = TweenService:Create(
+            hrp,
+            TweenInfo.new(duracao, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            { CFrame = targetCFrame }
+        )
+        tween:Play()
+        tween.Completed:Connect(function()
+            status.Text = string.format("✅ Chegou (%.0f studs)", nearest.dist)
             status.TextColor3 = Color3.fromRGB(150, 255, 150)
             tpBtn.Active = true
             tpBtn.Text = "⚡ TELEPORTAR"
             task.delay(2, function() status.Text = "" end)
             tpRunning = false
-            return
-        end
-
-        -- Timeout
-        if tick() - inicio > timeout then
-            conn:Disconnect()
-            hum:MoveTo(hrp.Position)
-            status.Text = "⚠️ Timeout — provavelmente tem parede"
-            status.TextColor3 = Color3.fromRGB(255, 180, 100)
-            tpBtn.Active = true
-            tpBtn.Text = "⚡ TELEPORTAR"
-            task.delay(3, function() status.Text = "" end)
-            tpRunning = false
-        end
-    end)
+        end)
+    end
 end)
 
 -- =========================================================
@@ -587,7 +583,6 @@ end)
 closeBtn.MouseButton1Click:Connect(function()
     panel.Visible = false
     reopenBtn.Visible = true
-    -- ✅ Sincroniza posição do botão de reabrir com a do painel
     reopenBtn.Position = panel.Position
 end)
 
@@ -599,13 +594,11 @@ end)
 -- =========================================================
 -- INIT
 -- =========================================================
-refreshPlayers()
 refreshDoors()
 updateInfo()
 
 task.spawn(function()
     while task.wait(CONFIG.ScanInterval) do
-        refreshPlayers()
         refreshDoors()
         updateInfo()
     end
