@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v31 (DEFINITIVA, verificada)
+    ESP + HUD — v32 (voo: sobe 200, desce 150)
 ]]
 
 local Players = game:GetService("Players")
@@ -29,8 +29,10 @@ local CONFIG = {
     SpeedClose     = 350,
     SpeedMedium    = 350,
     SpeedFar       = 300,
-    UsarVooBaixo  = true,
-    FlyHeight     = 100,
+    -- ✅ Voo: sobe 200, desce 150
+    SubirHeight   = 200,
+    DescerHeight  = 150,
+    UsarVoo       = true,
     ReduceHold    = true,
     HoldValue     = 0.1,
     AutoFire      = true,
@@ -347,7 +349,7 @@ vooToggle.BorderSizePixel = 0
 vooToggle.Font = Enum.Font.GothamBold
 vooToggle.TextSize = 10
 vooToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
-vooToggle.Text = "VOO POR BAIXO: ON"
+vooToggle.Text = "VOO (200↑ 150↓): ON"
 vooToggle.Parent = panel
 local vtc = Instance.new("UICorner"); vtc.CornerRadius = UDim.new(0, 6); vtc.Parent = vooToggle
 
@@ -587,10 +589,10 @@ autoFireToggle.MouseButton1Click:Connect(function()
 end)
 
 vooToggle.MouseButton1Click:Connect(function()
-    CONFIG.UsarVooBaixo = not CONFIG.UsarVooBaixo
-    vooToggle.Text = CONFIG.UsarVooBaixo and "VOO POR BAIXO: ON" or "VOO POR BAIXO: OFF"
+    CONFIG.UsarVoo = not CONFIG.UsarVoo
+    vooToggle.Text = CONFIG.UsarVoo and "VOO (200↑ 150↓): ON" or "VOO (200↑ 150↓): OFF"
     TweenService:Create(vooToggle, TweenInfo.new(0.2), {
-        BackgroundColor3 = CONFIG.UsarVooBaixo and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
+        BackgroundColor3 = CONFIG.UsarVoo and Color3.fromRGB(60, 200, 100) or Color3.fromRGB(200, 60, 60)
     }):Play()
 end)
 
@@ -739,7 +741,8 @@ local function refreshPlayers()
         if not pl.Parent or not pl.Character then
             destroyPlayerESP(d); playerESPs[pl] = nil
         else
-            d.highlight.Adornee = pl.Character        end
+            d.highlight.Adornee = pl.Character
+        end
     end
     for _, pl in ipairs(Players:GetPlayers()) do
         if pl ~= player and pl.Character and not playerESPs[pl] then
@@ -883,7 +886,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- =========================================================
--- TOGGLES DOOR/PLAYER (CORRIGIDO)
+-- TOGGLES
 -- =========================================================
 local function updateInfo()
     info.Text = string.format("Doors: %d | Players: %d",
@@ -937,7 +940,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE
+-- TELEPORTE (200↑ 150↓)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -988,6 +991,27 @@ local function tweenPara(hrp, destino, lookAt)
     tween.Completed:Wait()
 end
 
+-- ✅ VOO EM ARCO: sobe 200, vai por cima, desce 150
+local function voarAte(hrp, finalPos, lookAt)
+    local startPos = hrp.Position
+    local alturaSubir = startPos.Y + CONFIG.SubirHeight  -- sobe 200 do chão atual
+    local alturaDescer = finalPos.Y + CONFIG.DescerHeight -- desce 150 acima da porta
+
+    -- Ponto 1: sobe 200
+    local p1 = Vector3.new(startPos.X, alturaSubir, startPos.Z)
+    -- Ponto 2: vai por cima até XZ da porta (mantendo 200)
+    local p2 = Vector3.new(finalPos.X, alturaSubir, finalPos.Z)
+    -- Ponto 3: desce até 150 acima da porta
+    local p3 = Vector3.new(finalPos.X, alturaDescer, finalPos.Z)
+    -- Ponto 4: desce até o chão da porta
+    local p4 = finalPos
+
+    tweenPara(hrp, p1, lookAt)  -- 1. sobe 200
+    tweenPara(hrp, p2, lookAt)  -- 2. vai por cima
+    tweenPara(hrp, p3, lookAt)  -- 3. desce até 150 acima
+    tweenPara(hrp, p4, lookAt)  -- 4. desce até o chão
+end
+
 local tpRunning = false
 
 grudeBtn.MouseButton1Click:Connect(function()
@@ -1026,20 +1050,12 @@ grudeBtn.MouseButton1Click:Connect(function()
     grudeBtn.Text = "⏳ ..."
 
     task.spawn(function()
-        if CONFIG.UsarVooBaixo then
-            local startPos = hrp.Position
-            local alturaVoo = doorPos.Y - CONFIG.FlyHeight
-            local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)
-            local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)
-
-            status.Text = "✈️ Voando por baixo..."
+        if CONFIG.UsarVoo then
+            status.Text = "✈️ Voando (200↑ 150↓)..."
             status.TextColor3 = Color3.fromRGB(255, 200, 100)
-
-            tweenPara(hrp, p1, lookAt)
-            tweenPara(hrp, p2, lookAt)
-            tweenPara(hrp, finalPos, lookAt)
+            voarAte(hrp, finalPos, lookAt)
         else
-            status.Text = "⚡ Voando..."
+            status.Text = "⚡ Voando direto..."
             status.TextColor3 = Color3.fromRGB(255, 200, 100)
             tweenPara(hrp, finalPos, lookAt)
         end
@@ -1110,7 +1126,7 @@ trazerBtn.MouseButton1Click:Connect(function()
         finalPos = Vector3.new(finalPos.X, posOriginal.Y, finalPos.Z)
         local lookAt = Vector3.new(posOriginal.X, finalPos.Y, posOriginal.Z)
 
-        tweenPara(hrp, finalPos, lookAt)
+        voarAte(hrp, finalPos, lookAt)
         grudar(char, finalPos, lookAt)
 
         if CONFIG.AutoFire then
@@ -1149,10 +1165,10 @@ teleportarBtn.MouseButton1Click:Connect(function()
     finalPos = Vector3.new(finalPos.X, doorPos.Y, finalPos.Z)
     local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
 
-    status.Text = "✈️ Voando até a porta..."
+    status.Text = "✈️ Voando (200↑ 150↓)..."
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
-    tweenPara(hrp, finalPos, lookAt)
+    voarAte(hrp, finalPos, lookAt)
 
     if CONFIG.ReduceHold then aplicarHold() end
     if CONFIG.AutoFire then
