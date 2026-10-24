@@ -744,4 +744,165 @@ end
 reloadBtn.MouseButton1Click:Connect(function()
     refreshDoors(); refreshPlayers(); updateInfo()
     aplicarHold()
-   
+    status.Text = "🔄 Recarregado"
+    status.TextColor3 = Color3.fromRGB(150, 255, 150)
+    task.delay(2, function() status.Text = "" end)
+end)
+
+doorBtn.MouseButton1Click:Connect(function() setDoorEnabled(not doorEnabled) end)
+playerBtn.MouseButton1Click:Connect(function() setPlayerEnabled(not playerEnabled) end)
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == CONFIG.ToggleKey then setDoorEnabled(not doorEnabled) end
+end)
+
+-- =========================================================
+-- TELEPORTE POR CIMA (voo: sobe → vai → desce)
+-- =========================================================
+local function getNearestDoor()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    local myPos = hrp.Position
+    local nearest, nearestDist = nil, math.huge
+    for model, d in pairs(doorESPs) do
+        local part = d.mainPart
+        if part and part.Parent then
+            local dist = (part.Position - myPos).Magnitude
+            if dist < nearestDist then
+                nearestDist = dist
+                nearest = {model = model, part = part, dist = dist}
+            end
+        end
+    end
+    return nearest
+end
+
+local tpRunning = false
+
+local function moverSuave(char, fromPos, toPos, speed, lookAt)
+    local distancia = (toPos - fromPos).Magnitude
+    if distancia < 0.1 then return end
+
+    local stepSize = math.max(2, speed * CONFIG.StepDelay)
+    stepSize = math.min(stepSize, CONFIG.StepSize * 3)
+
+    local passos = math.ceil(distancia / stepSize)
+    local direcao = (toPos - fromPos).Unit
+    local atual = fromPos
+
+    for i = 1, passos do
+        if not char or not char.Parent then break end
+        if (toPos - atual).Magnitude < stepSize then
+            pcall(function()
+                char:PivotTo(CFrame.new(toPos, lookAt or (toPos + direcao)))
+            end)
+            return
+        end
+        atual = atual + direcao * stepSize
+        pcall(function()
+            char:PivotTo(CFrame.new(atual, lookAt or (atual + direcao)))
+        end)
+        task.wait(CONFIG.StepDelay)
+    end
+end
+
+tpBtn.MouseButton1Click:Connect(function()
+    if tpRunning then return end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then
+        status.Text = "❌ Sem personagem"
+        status.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.delay(2, function() status.Text = "" end)
+        return
+    end
+
+    local nearest = getNearestDoor()
+    if not nearest then
+        status.Text = "❌ Nenhuma HalloweenDoor encontrada"
+        status.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.delay(2, function() status.Text = "" end)
+        return
+    end
+
+    local doorPos = nearest.part.Position
+    local direction = (hrp.Position - doorPos).Unit
+    if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
+    local finalPos = doorPos + direction * CONFIG.TeleportOffset + Vector3.new(0, 3, 0)
+    local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
+
+    local startPos = hrp.Position
+    local alturaVoo = startPos.Y + CONFIG.FlyHeight
+
+    local p1 = Vector3.new(startPos.X, alturaVoo, startPos.Z)
+    local p2 = Vector3.new(finalPos.X, alturaVoo, finalPos.Z)
+    local p3 = finalPos
+
+    local distanciaTotal = (p1 - startPos).Magnitude
+                         + (p2 - p1).Magnitude
+                         + (p3 - p2).Magnitude
+
+    tpRunning = true
+    tpBtn.Active = false
+    tpBtn.Text = "⏳ ..."
+    status.Text = string.format("✈️ Voando por cima (%.0f studs)...", distanciaTotal)
+    status.TextColor3 = Color3.fromRGB(255, 200, 100)
+
+    task.spawn(function()
+        moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
+        moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
+        moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
+
+        pcall(function()
+            char:PivotTo(CFrame.new(finalPos, lookAt))
+        end)
+
+        -- Reaplica hold (a porta pode ter mudado)
+        aplicarHold()
+
+        status.Text = string.format("✅ Chegou (%.0f studs)", distanciaTotal)
+        status.TextColor3 = Color3.fromRGB(150, 255, 150)
+        tpBtn.Active = true
+        tpBtn.Text = "⚡ TELEPORTAR"
+        task.delay(2.5, function() status.Text = "" end)
+        tpRunning = false
+    end)
+end)
+
+-- =========================================================
+-- FECHAR / REABRIR
+-- =========================================================
+closeBtn.MouseButton1Click:Connect(function()
+    panel.Visible = false
+    reopenBtn.Visible = true
+    reopenBtn.Position = panel.Position
+end)
+
+reopenBtn.MouseButton1Click:Connect(function()
+    panel.Visible = true
+    reopenBtn.Visible = false
+end)
+
+-- =========================================================
+-- INIT
+-- =========================================================
+refreshPlayers()
+refreshDoors()
+updateInfo()
+aplicarHold()
+
+-- Loop de refresh (portas + players + hold)
+task.spawn(function()
+    while task.wait(CONFIG.ScanInterval) do
+        refreshPlayers()
+        refreshDoors()
+        updateInfo()
+        if CONFIG.ReduceHold then
+            aplicarHold()
+        end
+    end
+end)
