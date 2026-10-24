@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v20 (corrigido, sem erro de sintaxe)
+    ESP + HUD — v21 (teleporta + ativa + mantém posição por 1s)
 ]]
 
 local Players = game:GetService("Players")
@@ -33,7 +33,7 @@ local CONFIG = {
     ReduceHold    = true,
     HoldValue     = 0.1,
     AutoFire      = true,
-    ManterPosicao = 0.5,
+    ManterPosicao = 1.0, -- ✅ 1 segundo re-fixando posição
 }
 
 -- =========================================================
@@ -774,7 +774,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE + AUTO-FIRE
+-- TELEPORTE + AUTO-FIRE (mantém posição por 1s)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -878,16 +878,19 @@ tpBtn.MouseButton1Click:Connect(function()
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
 
     task.spawn(function()
+        -- Voando por cima
         moverSuave(char, startPos, p1, CONFIG.TeleportSpeed, lookAt)
         moverSuave(char, p1, p2, CONFIG.TeleportSpeed, lookAt)
         moverSuave(char, p2, p3, CONFIG.TeleportSpeed, lookAt)
 
+        -- Chegou
         pcall(function()
             char:PivotTo(CFrame.new(finalPos, lookAt))
         end)
 
         if CONFIG.ReduceHold then aplicarHold() end
 
+        -- ✅ AUTO-FIRE: dispara e mantém posição por 1s
         if CONFIG.AutoFire then
             local prompt = getPromptFromDoor(nearest.model)
             if prompt then
@@ -897,6 +900,7 @@ tpBtn.MouseButton1Click:Connect(function()
                     end)
                 end
 
+                -- Dispara
                 if fireproximityprompt then
                     pcall(function() fireproximityprompt(prompt) end)
                 else
@@ -906,6 +910,7 @@ tpBtn.MouseButton1Click:Connect(function()
                     end)
                 end
 
+                -- ✅ Continua re-fixando posição por ManterPosicao segundos
                 local manterAte = tick() + CONFIG.ManterPosicao
                 while tick() < manterAte do
                     if char and char.Parent and hrp and hrp.Parent then
