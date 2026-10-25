@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v35 (otimizado, sem crash)
+    ESP + HUD — v36 (teleporta na FRENTE da porta usando LookVector)
 ]]
 
 local Players = game:GetService("Players")
@@ -39,7 +39,7 @@ local CONFIG = {
     AutoHoldRange = 15,
     NoclipEnabled = false,
     AntiAFK       = true,
-    DirUpdateInterval = 0.3, -- segundos entre updates da direção
+    DirUpdateInterval = 0.3,
 }
 
 -- Anti-AFK
@@ -53,12 +53,10 @@ if CONFIG.AntiAFK then
     end)
 end
 
--- Estado
 local grudado = false
 local posGrude = nil
 local lookGrude = nil
 local grudeConn = nil
-local portaMaisProxima = nil
 
 -- =========================================================
 -- HUD BASE
@@ -376,6 +374,18 @@ dirLabel.TextSize = 11
 dirLabel.TextXAlignment = Enum.TextXAlignment.Left
 dirLabel.Parent = panel
 
+-- ✅ Label extra: direção da PORTA (LookVector)
+local faceLabel = Instance.new("TextLabel")
+faceLabel.Size = UDim2.new(1, -20, 0, 16)
+faceLabel.Position = UDim2.new(0, 10, 0, 480)
+faceLabel.BackgroundTransparency = 1
+faceLabel.Text = "🚪 Frente da porta: —"
+faceLabel.TextColor3 = Color3.fromRGB(255, 200, 150)
+faceLabel.Font = Enum.Font.GothamBold
+faceLabel.TextSize = 11
+faceLabel.TextXAlignment = Enum.TextXAlignment.Left
+faceLabel.Parent = panel
+
 -- =========================================================
 -- FUNÇÕES GRUDE
 -- =========================================================
@@ -417,6 +427,100 @@ local function grudar(char, pos, lookAt)
 end
 
 -- =========================================================
+-- ✅ FUNÇÃO: PEGAR POSIÇÃO NA FRENTE DA PORTA
+-- =========================================================
+local function getFrenteDaPorta(doorPart, offset)
+    -- LookVector da porta = direção que ela está "olhando"
+    local look = doorPart.CFrame.LookVector
+    -- Remove componente vertical (a porta pode estar inclinada)
+    local lookFlat = Vector3.new(look.X, 0, look.Z)
+    if lookFlat.Magnitude < 0.1 then
+        -- fallback: usa RightVector se LookVector for vertical
+        lookFlat = doorPart.CFrame.RightVector
+        lookFlat = Vector3.new(lookFlat.X, 0, lookFlat.Z)
+    end
+    lookFlat = lookFlat.Unit
+
+    -- Posição na frente da porta (5 studs na direção que ela olha)
+    local frente = doorPart.Position + lookFlat * (offset or CONFIG.TeleportOffset)
+    -- Mantém a altura Y da porta
+    frente = Vector3.new(frente.X, doorPart.Position.Y, frente.Z)
+
+    return frente, lookFlat
+end
+
+-- =========================================================
+-- ✅ FUNÇÃO: DIREÇÃO DA PORTA RELATIVA AO PLAYER
+-- =========================================================
+local function getDirecaoPorta(doorPart)
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp or not doorPart then return "—" end
+
+    local myPos = hrp.Position
+    local doorPos = doorPart.Position
+    local diff = Vector3.new(doorPos.X - myPos.X, 0, doorPos.Z - myPos.Z)
+    if diff.Magnitude < 0.1 then return "AQUI" end
+    diff = diff.Unit
+
+    local look = hrp.CFrame.LookVector
+    local lookFlat = Vector3.new(look.X, 0, look.Z).Unit
+    local right = hrp.CFrame.RightVector
+    local rightFlat = Vector3.new(right.X, 0, right.Z).Unit
+
+    local dotFrente = lookFlat:Dot(diff)
+    local dotLado = rightFlat:Dot(diff)
+    local angulo = math.deg(math.acos(math.clamp(dotFrente, -1, 1)))
+
+    local direcao = ""
+    if dotFrente > 0.7 then direcao = "FRENTE"
+    elseif dotFrente < -0.7 then direcao = "ATRÁS"
+    elseif dotLado > 0.7 then direcao = "DIREITA"
+    elseif dotLado < -0.7 then direcao = "ESQUERDA"
+    elseif dotFrente > 0 and dotLado > 0 then direcao = "FRENTE-DIREITA"
+    elseif dotFrente > 0 and dotLado < 0 then direcao = "FRENTE-ESQUERDA"
+    elseif dotFrente < 0 and dotLado > 0 then direcao = "ATRÁS-DIREITA"
+    elseif dotFrente < 0 and dotLado < 0 then direcao = "ATRÁS-ESQUERDA"
+    else direcao = "?" end
+
+    local dist = (doorPos - myPos).Magnitude
+    return string.format("%s (%.0f° | %.0f studs)", direcao, angulo, dist)
+end
+
+-- =========================================================
+-- ✅ FUNÇÃO: DIREÇÃO DA FRENTE DA PORTA vs PLAYER
+-- =========================================================
+local function getDirecaoFrentePorta(doorPart)
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp or not doorPart then return "—" end
+
+    local frentePos, lookFlat = getFrenteDaPorta(doorPart)
+    local myPos = hrp.Position
+
+    -- Vetor do player até a frente da porta
+    local diff = Vector3.new(frentePos.X - myPos.X, 0, frentePos.Z - myPos.Z)
+    if diff.Magnitude < 0.1 then return "AQUI" end
+    diff = diff.Unit
+
+    -- Compara com a direção que você está olhando
+    local myLook = hrp.CFrame.LookVector
+    local myLookFlat = Vector3.new(myLook.X, 0, myLook.Z).Unit
+
+    local dot = myLookFlat:Dot(diff)
+    local angulo = math.deg(math.acos(math.clamp(dot, -1, 1)))
+
+    -- Onde está a frente da porta em relação a você
+    local portaLookVsPlayer = lookFlat:Dot(myLookFlat)
+    local alinhamento = ""
+    if portaLookVsPlayer > 0.7 then alinhamento = "VOCÊ VÊ A FRENTE"
+    elseif portaLookVsPlayer < -0.7 then alinhamento = "VOCÊ VÊ AS COSTAS"
+    else alinhamento = "VOCÊ VÊ O LADO" end
+
+    return string.format("%.0f° | %s", angulo, alinhamento)
+end
+
+-- =========================================================
 -- NOCLIP
 -- =========================================================
 local noclipConn = nil
@@ -455,7 +559,7 @@ noclipToggle.MouseButton1Click:Connect(function()
 end)
 
 -- =========================================================
--- AUTO HOLD (loop 1s, leve — só percorre doorESPs)
+-- AUTO HOLD
 -- =========================================================
 local autoHoldThread = nil
 
@@ -474,7 +578,6 @@ local function iniciarAutoHold()
             local char = player.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             if hrp then
-                -- ✅ Percorre só doorESPs (já tem as portas cacheadas)
                 for model in pairs(doorESPs) do
                     if model and model.Parent then
                         local prompt = nil
@@ -834,7 +937,7 @@ local function refreshDoors()
 end
 
 -- =========================================================
--- GET NEAREST DOOR (cache, chamada só nos loops certos)
+-- GET NEAREST DOOR
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -854,44 +957,6 @@ local function getNearestDoor()
         end
     end
     return nearest
-end
-
--- =========================================================
--- DIREÇÃO DA PORTA
--- =========================================================
-local function getDirecaoPorta(doorPart)
-    local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp or not doorPart then return "—" end
-
-    local myPos = hrp.Position
-    local doorPos = doorPart.Position
-    local diff = Vector3.new(doorPos.X - myPos.X, 0, doorPos.Z - myPos.Z)
-    if diff.Magnitude < 0.1 then return "AQUI" end
-    diff = diff.Unit
-
-    local look = hrp.CFrame.LookVector
-    local lookFlat = Vector3.new(look.X, 0, look.Z).Unit
-    local right = hrp.CFrame.RightVector
-    local rightFlat = Vector3.new(right.X, 0, right.Z).Unit
-
-    local dotFrente = lookFlat:Dot(diff)
-    local dotLado = rightFlat:Dot(diff)
-    local angulo = math.deg(math.acos(math.clamp(dotFrente, -1, 1)))
-
-    local direcao = ""
-    if dotFrente > 0.7 then direcao = "FRENTE"
-    elseif dotFrente < -0.7 then direcao = "ATRÁS"
-    elseif dotLado > 0.7 then direcao = "DIREITA"
-    elseif dotLado < -0.7 then direcao = "ESQUERDA"
-    elseif dotFrente > 0 and dotLado > 0 then direcao = "FRENTE-DIREITA"
-    elseif dotFrente > 0 and dotLado < 0 then direcao = "FRENTE-ESQUERDA"
-    elseif dotFrente < 0 and dotLado > 0 then direcao = "ATRÁS-DIREITA"
-    elseif dotFrente < 0 and dotLado < 0 then direcao = "ATRÁS-ESQUERDA"
-    else direcao = "?" end
-
-    local dist = (doorPos - myPos).Magnitude
-    return string.format("%s (%.0f° | %.0f studs)", direcao, angulo, dist)
 end
 
 -- =========================================================
@@ -949,7 +1014,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- =========================================================
--- LOOP DIREÇÃO (otimizado, 0.3s)
+-- LOOP DIREÇÃO (otimizado)
 -- =========================================================
 task.spawn(function()
     while task.wait(CONFIG.DirUpdateInterval) do
@@ -958,11 +1023,18 @@ task.spawn(function()
         if hrp then
             local nearest = getNearestDoor()
             if nearest and nearest.part then
-                dirLabel.Text = "🧭 Direção: " .. getDirecaoPorta(nearest.part)
+                -- Direção da porta em relação ao player
+                dirLabel.Text = "🧭 Porta: " .. getDirecaoPorta(nearest.part)
                 dirLabel.TextColor3 = Color3.fromRGB(180, 220, 255)
+
+                -- Frente da porta (LookVector dela)
+                faceLabel.Text = "🚪 Frente: " .. getDirecaoFrentePorta(nearest.part)
+                faceLabel.TextColor3 = Color3.fromRGB(255, 200, 150)
             else
-                dirLabel.Text = "🧭 Direção: — (sem porta)"
+                dirLabel.Text = "🧭 Porta: — (sem porta)"
                 dirLabel.TextColor3 = Color3.fromRGB(150, 150, 170)
+                faceLabel.Text = "🚪 Frente: —"
+                faceLabel.TextColor3 = Color3.fromRGB(150, 150, 170)
             end
         end
     end
@@ -1023,7 +1095,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- =========================================================
--- TELEPORTE
+-- TELEPORTE (usa LookVector da PORTA pra ficar na frente)
 -- =========================================================
 local function getPromptFromDoor(doorModel)
     for _, d in ipairs(doorModel:GetDescendants()) do
@@ -1095,13 +1167,10 @@ grudeBtn.MouseButton1Click:Connect(function()
         return
     end
 
-    local doorPos = nearest.part.Position
-    local direction = (hrp.Position - doorPos).Unit
-    if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
-
-    local finalPos = doorPos + direction * CONFIG.TeleportOffset
-    finalPos = Vector3.new(finalPos.X, doorPos.Y, finalPos.Z)
-    local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
+    -- ✅ Usa a FRENTE da porta (LookVector dela)
+    local finalPos, portaLook = getFrenteDaPorta(nearest.part)
+    -- Olha pra porta
+    local lookAt = Vector3.new(nearest.part.Position.X, finalPos.Y, nearest.part.Position.Z)
 
     tpRunning = true
     grudeBtn.Active = false
@@ -1138,7 +1207,7 @@ grudeBtn.MouseButton1Click:Connect(function()
             end
         end
 
-        status.Text = "🔥 Grudado + ativado!"
+        status.Text = "🔥 Na frente da porta + ativado!"
         status.TextColor3 = Color3.fromRGB(150, 255, 150)
         grudeBtn.Active = true
         grudeBtn.Text = "🔓 SOLTAR"
@@ -1178,10 +1247,8 @@ trazerBtn.MouseButton1Click:Connect(function()
         status.Text = "⚠️ Porta voltou. Voando até ela..."
         status.TextColor3 = Color3.fromRGB(255, 180, 100)
 
-        local direction = (hrp.Position - posOriginal).Unit
-        if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
-        local finalPos = posOriginal + direction * CONFIG.TeleportOffset
-        finalPos = Vector3.new(finalPos.X, posOriginal.Y, finalPos.Z)
+        -- ✅ Usa a frente da porta
+        local finalPos = getFrenteDaPorta(nearest.part)
         local lookAt = Vector3.new(posOriginal.X, finalPos.Y, posOriginal.Z)
 
         voarAte(hrp, finalPos, lookAt)
@@ -1194,7 +1261,7 @@ trazerBtn.MouseButton1Click:Connect(function()
             end
         end
 
-        status.Text = "⚡ Voou até a porta + ativou"
+        status.Text = "⚡ Voou até a frente da porta + ativou"
         status.TextColor3 = Color3.fromRGB(150, 255, 150)
     else
         status.Text = "✅ Porta trouxe até você!"
@@ -1216,12 +1283,9 @@ teleportarBtn.MouseButton1Click:Connect(function()
         return
     end
 
-    local doorPos = nearest.part.Position
-    local direction = (hrp.Position - doorPos).Unit
-    if direction.Magnitude < 0.1 then direction = Vector3.new(0, 0, 1) end
-    local finalPos = doorPos + direction * CONFIG.TeleportOffset
-    finalPos = Vector3.new(finalPos.X, doorPos.Y, finalPos.Z)
-    local lookAt = Vector3.new(doorPos.X, finalPos.Y, doorPos.Z)
+    -- ✅ Usa a frente da porta
+    local finalPos = getFrenteDaPorta(nearest.part)
+    local lookAt = Vector3.new(nearest.part.Position.X, finalPos.Y, nearest.part.Position.Z)
 
     status.Text = "✈️ Voando (200↑ 150↓)..."
     status.TextColor3 = Color3.fromRGB(255, 200, 100)
@@ -1236,7 +1300,7 @@ teleportarBtn.MouseButton1Click:Connect(function()
         end
     end
 
-    status.Text = "✅ Chegou + ativou"
+    status.Text = "✅ Na frente da porta + ativou"
     status.TextColor3 = Color3.fromRGB(150, 255, 150)
     task.delay(2, function() status.Text = "" end)
 end)
