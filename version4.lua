@@ -1,5 +1,5 @@
 --[[
-    ESP + HUD — v34 (voo 200↑ 150↓ + auto-hold loop 1s + direção da porta)
+    ESP + HUD — v35 (otimizado, sem crash)
 ]]
 
 local Players = game:GetService("Players")
@@ -23,7 +23,7 @@ local CONFIG = {
     PlayerFill    = 0.7,
     PlayerMaxDist = 2000,
     ToggleKey     = Enum.KeyCode.E,
-    ScanInterval  = 2,
+    ScanInterval  = 3,
     TeleportOffset = 5,
     SpeedVeryClose = 1000,
     SpeedClose     = 350,
@@ -39,6 +39,7 @@ local CONFIG = {
     AutoHoldRange = 15,
     NoclipEnabled = false,
     AntiAFK       = true,
+    DirUpdateInterval = 0.3, -- segundos entre updates da direção
 }
 
 -- Anti-AFK
@@ -52,11 +53,12 @@ if CONFIG.AntiAFK then
     end)
 end
 
--- Estado do grude
+-- Estado
 local grudado = false
 local posGrude = nil
 local lookGrude = nil
 local grudeConn = nil
+local portaMaisProxima = nil
 
 -- =========================================================
 -- HUD BASE
@@ -363,7 +365,6 @@ status.TextSize = 11
 status.TextXAlignment = Enum.TextXAlignment.Left
 status.Parent = panel
 
--- ✅ Label de direção da porta
 local dirLabel = Instance.new("TextLabel")
 dirLabel.Size = UDim2.new(1, -20, 0, 16)
 dirLabel.Position = UDim2.new(0, 10, 0, 462)
@@ -416,44 +417,6 @@ local function grudar(char, pos, lookAt)
 end
 
 -- =========================================================
--- DIREÇÃO DA PORTA
--- =========================================================
-local function getDirecaoPorta(doorPart)
-    local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp or not doorPart then return "—" end
-
-    local myPos = hrp.Position
-    local doorPos = doorPart.Position
-    local diff = Vector3.new(doorPos.X - myPos.X, 0, doorPos.Z - myPos.Z)
-    if diff.Magnitude < 0.1 then return "AQUI" end
-    diff = diff.Unit
-
-    local look = hrp.CFrame.LookVector
-    local lookFlat = Vector3.new(look.X, 0, look.Z).Unit
-    local right = hrp.CFrame.RightVector
-    local rightFlat = Vector3.new(right.X, 0, right.Z).Unit
-
-    local dotFrente = lookFlat:Dot(diff)
-    local dotLado = rightFlat:Dot(diff)
-    local angulo = math.deg(math.acos(math.clamp(dotFrente, -1, 1)))
-
-    local direcao = ""
-    if dotFrente > 0.7 then direcao = "FRENTE"
-    elseif dotFrente < -0.7 then direcao = "ATRÁS"
-    elseif dotLado > 0.7 then direcao = "DIREITA"
-    elseif dotLado < -0.7 then direcao = "ESQUERDA"
-    elseif dotFrente > 0 and dotLado > 0 then direcao = "FRENTE-DIREITA"
-    elseif dotFrente > 0 and dotLado < 0 then direcao = "FRENTE-ESQUERDA"
-    elseif dotFrente < 0 and dotLado > 0 then direcao = "ATRÁS-DIREITA"
-    elseif dotFrente < 0 and dotLado < 0 then direcao = "ATRÁS-ESQUERDA"
-    else direcao = "?" end
-
-    local dist = (doorPos - myPos).Magnitude
-    return string.format("%s (%.0f° | %.0f studs)", direcao, angulo, dist)
-end
-
--- =========================================================
 -- NOCLIP
 -- =========================================================
 local noclipConn = nil
@@ -492,7 +455,7 @@ noclipToggle.MouseButton1Click:Connect(function()
 end)
 
 -- =========================================================
--- AUTO HOLD (loop 1s, tenta até coletar)
+-- AUTO HOLD (loop 1s, leve — só percorre doorESPs)
 -- =========================================================
 local autoHoldThread = nil
 
@@ -511,33 +474,28 @@ local function iniciarAutoHold()
             local char = player.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             if hrp then
-                for _, d in ipairs(Workspace:GetDescendants()) do
-                    if d:IsA("ProximityPrompt") then
-                        local pai = d
-                        local porta = nil
-                        local estaNaPorta = false
-                        for _ = 1, 10 do
-                            pai = pai.Parent
-                            if not pai then break end
-                            if pai.Name == CONFIG.DoorName then
-                                estaNaPorta = true
-                                porta = pai
+                -- ✅ Percorre só doorESPs (já tem as portas cacheadas)
+                for model in pairs(doorESPs) do
+                    if model and model.Parent then
+                        local prompt = nil
+                        for _, d in ipairs(model:GetDescendants()) do
+                            if d:IsA("ProximityPrompt") then
+                                prompt = d
                                 break
                             end
                         end
-
-                        if estaNaPorta and porta and porta.Parent then
-                            local promptPart = d.Parent
-                            if promptPart and promptPart:IsA("BasePart") then
+                        if prompt and prompt.Parent then
+                            local promptPart = prompt.Parent
+                            if promptPart:IsA("BasePart") then
                                 local dist = (hrp.Position - promptPart.Position).Magnitude
                                 if dist <= CONFIG.AutoHoldRange then
                                     if fireproximityprompt then
-                                        pcall(function() fireproximityprompt(d) end)
+                                        pcall(function() fireproximityprompt(prompt) end)
                                     else
                                         pcall(function()
-                                            d:InputHoldBegin()
+                                            prompt:InputHoldBegin()
                                             task.wait(0.05)
-                                            d:InputHoldEnd()
+                                            prompt:InputHoldEnd()
                                         end)
                                     end
                                 end
@@ -579,31 +537,22 @@ local function aplicarHoldEmPrompt(prompt)
 end
 
 local function aplicarHold()
-    for _, d in ipairs(Workspace:GetDescendants()) do
-        if d:IsA("ProximityPrompt") then
-            local pai = d
-            local estaNaPorta = false
-            for _ = 1, 10 do
-                pai = pai.Parent
-                if not pai then break end
-                if pai.Name == CONFIG.DoorName then
-                    estaNaPorta = true
-                    break
-                end
-            end
-
-            if estaNaPorta then
-                aplicarHoldEmPrompt(d)
-                if not holdMonitors[d] then
-                    holdMonitors[d] = true
-                    d:GetPropertyChangedSignal("HoldDuration"):Connect(function()
-                        if CONFIG.ReduceHold and d.HoldDuration ~= CONFIG.HoldValue then
-                            task.wait(0.05)
-                            pcall(function()
-                                d.HoldDuration = CONFIG.HoldValue
-                            end)
-                        end
-                    end)
+    for model in pairs(doorESPs) do
+        if model and model.Parent then
+            for _, d in ipairs(model:GetDescendants()) do
+                if d:IsA("ProximityPrompt") then
+                    aplicarHoldEmPrompt(d)
+                    if not holdMonitors[d] then
+                        holdMonitors[d] = true
+                        d:GetPropertyChangedSignal("HoldDuration"):Connect(function()
+                            if CONFIG.ReduceHold and d.HoldDuration ~= CONFIG.HoldValue then
+                                task.wait(0.05)
+                                pcall(function()
+                                    d.HoldDuration = CONFIG.HoldValue
+                                end)
+                            end
+                        end)
+                    end
                 end
             end
         end
@@ -885,7 +834,7 @@ local function refreshDoors()
 end
 
 -- =========================================================
--- GET NEAREST DOOR (definida ANTES do loop)
+-- GET NEAREST DOOR (cache, chamada só nos loops certos)
 -- =========================================================
 local function getNearestDoor()
     local char = player.Character
@@ -908,7 +857,45 @@ local function getNearestDoor()
 end
 
 -- =========================================================
--- LOOP (ESP + direção)
+-- DIREÇÃO DA PORTA
+-- =========================================================
+local function getDirecaoPorta(doorPart)
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp or not doorPart then return "—" end
+
+    local myPos = hrp.Position
+    local doorPos = doorPart.Position
+    local diff = Vector3.new(doorPos.X - myPos.X, 0, doorPos.Z - myPos.Z)
+    if diff.Magnitude < 0.1 then return "AQUI" end
+    diff = diff.Unit
+
+    local look = hrp.CFrame.LookVector
+    local lookFlat = Vector3.new(look.X, 0, look.Z).Unit
+    local right = hrp.CFrame.RightVector
+    local rightFlat = Vector3.new(right.X, 0, right.Z).Unit
+
+    local dotFrente = lookFlat:Dot(diff)
+    local dotLado = rightFlat:Dot(diff)
+    local angulo = math.deg(math.acos(math.clamp(dotFrente, -1, 1)))
+
+    local direcao = ""
+    if dotFrente > 0.7 then direcao = "FRENTE"
+    elseif dotFrente < -0.7 then direcao = "ATRÁS"
+    elseif dotLado > 0.7 then direcao = "DIREITA"
+    elseif dotLado < -0.7 then direcao = "ESQUERDA"
+    elseif dotFrente > 0 and dotLado > 0 then direcao = "FRENTE-DIREITA"
+    elseif dotFrente > 0 and dotLado < 0 then direcao = "FRENTE-ESQUERDA"
+    elseif dotFrente < 0 and dotLado > 0 then direcao = "ATRÁS-DIREITA"
+    elseif dotFrente < 0 and dotLado < 0 then direcao = "ATRÁS-ESQUERDA"
+    else direcao = "?" end
+
+    local dist = (doorPos - myPos).Magnitude
+    return string.format("%s (%.0f° | %.0f studs)", direcao, angulo, dist)
+end
+
+-- =========================================================
+-- LOOP ESP
 -- =========================================================
 RunService.RenderStepped:Connect(function()
     if playerEnabled then
@@ -962,10 +949,10 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- =========================================================
--- LOOP DE DIREÇÃO (separado, 5x/seg)
+-- LOOP DIREÇÃO (otimizado, 0.3s)
 -- =========================================================
 task.spawn(function()
-    while task.wait(0.2) do
+    while task.wait(CONFIG.DirUpdateInterval) do
         local char = player.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if hrp then
